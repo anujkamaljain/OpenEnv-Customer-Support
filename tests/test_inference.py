@@ -14,6 +14,13 @@ import pytest
 import inference
 
 
+@pytest.fixture(autouse=True)
+def _single_difficulty_for_tests() -> Any:
+    """Full baseline runs easy+medium+hard; unit tests keep one episode."""
+    with patch.object(inference, "EPISODE_DIFFICULTIES", ["easy"]):
+        yield
+
+
 # ── mock helpers ─────────────────────────────────────────────────────────────
 
 def _make_mock_client(responses: list[str]) -> AsyncMock:
@@ -280,6 +287,21 @@ async def test_error_field_unmodified(capsys: pytest.CaptureFixture[str]) -> Non
                     f"Error should be unmodified: {m.group(1)}"
                 )
     assert found_error, "Expected at least one step with an error"
+
+
+@pytest.mark.asyncio
+async def test_default_baseline_runs_three_tasks(capsys: pytest.CaptureFixture[str]) -> None:
+    """With easy+medium+hard, inference emits one [START]/[END] block per task."""
+    garbage = ["not json"] * 60
+    mock_client = _make_mock_client(garbage)
+
+    with patch.object(inference, "EPISODE_DIFFICULTIES", ["easy", "medium", "hard"]):
+        with patch.object(inference, "_build_client", return_value=mock_client):
+            await inference.run()
+
+    out = capsys.readouterr().out
+    assert out.count("[START]") == 3
+    assert out.count("[END]") == 3
 
 
 @pytest.mark.asyncio

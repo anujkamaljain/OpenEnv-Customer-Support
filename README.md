@@ -4,6 +4,8 @@ emoji: 🌍
 colorFrom: purple
 colorTo: indigo
 sdk: docker
+tags:
+  - openenv
 app_port: 7860
 pinned: false
 license: mit
@@ -263,6 +265,8 @@ docker run -p 7860:7860 -e HF_TOKEN=your_token openenv-customer-support
 | `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | Model to use via HF router |
 | `API_BASE_URL` | `https://router.huggingface.co/v1` | OpenAI-compatible API endpoint |
 | `TASK_NAME` | `customer_support_triage` | Task identifier for validator output |
+| `OPENENV_DIFFICULTIES` | `easy,medium,hard` | Subset/order of baseline episodes (comma-separated) |
+| `BENCHMARK` | `customer_support_triage` | `env=` field in `[START]` lines (matches `openenv.yaml` `name`) |
 
 ---
 

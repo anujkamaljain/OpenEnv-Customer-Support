@@ -124,7 +124,6 @@ async def inference_endpoint() -> dict[str, Any]:
                     score = float(part.split("=")[1])
                 if part.startswith("success="):
                     success = part.split("=")[1] == "true"
-            break
 
     return {"stdout": stdout, "score": score, "success": success}
 

@@ -19,12 +19,25 @@ from env.environment import CustomerSupportEnv
 # ── configuration ────────────────────────────────────────────────────────────
 
 TASK_NAME = os.environ.get("TASK_NAME", "customer_support_triage")
-BENCHMARK = os.environ.get("BENCHMARK", "openenv")
+BENCHMARK = os.environ.get("BENCHMARK", "customer_support_triage")
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 MAX_STEPS = 10
+
+# Comma-separated subset of easy,medium,hard — default runs full hackathon baseline.
+def _episode_difficulties() -> list[str]:
+    default_order = ("easy", "medium", "hard")
+    raw = os.environ.get("OPENENV_DIFFICULTIES", "")
+    if not raw.strip():
+        return list(default_order)
+    want = {x.strip().lower() for x in raw.split(",") if x.strip()}
+    picked = [d for d in default_order if d in want]
+    return picked if picked else list(default_order)
+
+
+EPISODE_DIFFICULTIES: list[str] = _episode_difficulties()
 
 # ── valid enum values (for clamping bad model output) ────────────────────────
 
@@ -70,8 +83,8 @@ _FALLBACK: dict[str, dict[str, Any]] = {
 # ── stdout helpers ───────────────────────────────────────────────────────────
 
 
-def _emit_start() -> None:
-    print(f"[START] task={TASK_NAME} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+def _emit_start(task: str) -> None:
+    print(f"[START] task={task} env={BENCHMARK} model={MODEL_NAME}", flush=True)
 
 
 def _emit_step(
@@ -291,24 +304,26 @@ def _action_to_str(action: dict[str, Any]) -> str:
 # ── main loop ────────────────────────────────────────────────────────────────
 
 
-async def run() -> None:
+async def _run_one_episode(
+    env: CustomerSupportEnv,
+    client: AsyncOpenAI,
+    difficulty: str,
+) -> None:
+    """One full episode: [START] … [STEP]* … [END] for a single difficulty."""
     rewards: list[float] = []
     steps = 0
     score = 0.0
     success = False
 
+    _emit_start(difficulty)
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+    ]
+
     try:
-        _emit_start()
-
-        env = CustomerSupportEnv()
-        client = _build_client()
-
-        result = await env.reset(seed=0)
+        result = await env.reset(seed=0, difficulty=difficulty)
         obs = result.observation
-
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-        ]
 
         for step_idx in range(MAX_STEPS):
             user_msg = _obs_to_user_message(obs)
@@ -358,8 +373,6 @@ async def run() -> None:
         else:
             score = result.info.get("normalized_score", 0.0)
 
-        await env.close()
-
     except Exception:
         error_msg = traceback.format_exc().splitlines()[-1][:200]
         if not rewards:
@@ -368,6 +381,27 @@ async def run() -> None:
 
     success = score > 0.1
     _emit_end(success, steps, score, rewards)
+
+
+async def run() -> None:
+    env = CustomerSupportEnv()
+    try:
+        try:
+            client = _build_client()
+        except Exception:
+            _emit_start(TASK_NAME)
+            error_msg = traceback.format_exc().splitlines()[-1][:200]
+            _emit_step(1, "{}", 0.0, True, error_msg[:200])
+            _emit_end(False, 1, 0.0, [])
+            return
+
+        for difficulty in EPISODE_DIFFICULTIES:
+            await _run_one_episode(env, client, difficulty)
+    finally:
+        try:
+            await env.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
