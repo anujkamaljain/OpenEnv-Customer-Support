@@ -1,11 +1,6 @@
 """Deterministic grader — all scoring uses exact string / numeric comparisons.
 
 No LLM, no embeddings, no randomness.
-
-v2 additions:
-    - ``weighted_keyword_score`` with required / optional / forbidden keywords
-    - ``sla_penalty`` for deadline overage
-    - Multi-objective ``grade_episode`` with urgency + SLA dimensions
 """
 
 from __future__ import annotations
@@ -14,37 +9,81 @@ import re
 
 from models.ticket import KeywordSpec
 
+_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
+
 
 class DeterministicGrader:
     """Stateless scoring utilities for actions and full episodes."""
+
+    # ------------------------------------------------------------------
+    # Text normalization helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        """Lowercase, strip punctuation, split into word tokens."""
+        return _PUNCT_RE.sub(" ", text.lower()).split()
+
+    @staticmethod
+    def _kw_matches(kw: str, tokens: list[str], joined: str) -> bool:
+        """Match a keyword against tokenized text.
+
+        Single-word keywords use token-prefix matching (stem-aware):
+        keyword ``"apolog"`` matches token ``"apologize"`` but
+        keyword ``"fix"`` does NOT match token ``"prefix"``.
+
+        Multi-word keywords use phrase matching on the joined
+        normalized text so ``"not a bug"`` matches as a contiguous phrase.
+        """
+        parts = _PUNCT_RE.sub(" ", kw.lower()).split()
+        if not parts:
+            return False
+        if len(parts) == 1:
+            return any(tok.startswith(parts[0]) for tok in tokens)
+        return " ".join(parts) in joined
+
+    @staticmethod
+    def _diversity_factor(tokens: list[str]) -> float:
+        """Penalize low-diversity text to prevent repetition gaming.
+
+        Returns 1.0 for text with >= 50 % unique tokens.
+        Below that threshold, scales linearly toward 0.
+        """
+        if len(tokens) < 3:
+            return 1.0
+        ratio = len(set(tokens)) / len(tokens)
+        if ratio >= 0.5:
+            return 1.0
+        return ratio / 0.5
 
     # ------------------------------------------------------------------
     # Keyword scoring
     # ------------------------------------------------------------------
 
     @staticmethod
-    def keyword_overlap(text: str, keywords: list[str]) -> float:
-        """Legacy helper — fraction of *keywords* found via substring match."""
-        if not keywords:
-            return 1.0
-        text_lower = text.lower()
-        matched = sum(1 for kw in keywords if kw.lower() in text_lower)
-        return matched / len(keywords)
-
-    @staticmethod
     def weighted_keyword_score(text: str, spec: KeywordSpec) -> tuple[float, float]:
         """Score *text* against a :class:`KeywordSpec`.
 
         Returns ``(quality, forbidden_penalty)`` where:
-        - *quality* ∈ [0, 1] — weighted hit ratio (60 % required, 40 % optional).
-          Halved when ``min_required_hits`` is not met.
+
+        - *quality* ∈ [0, 1] — weighted hit ratio (60 % required, 40 %
+          optional), scaled by token diversity, halved when
+          ``min_required_hits`` is not met.
         - *forbidden_penalty* ≤ 0 — ``-0.03`` per forbidden keyword found.
+
+        Text is normalized (lowercased, punctuation stripped) and tokenized.
+        Single-word keywords use token-prefix matching (stem-aware).
+        Multi-word keywords use phrase matching on the normalized text.
+        A diversity factor penalizes repetitive text (< 50 % unique tokens).
         """
-        text_lower = text.lower()
+        tokens = DeterministicGrader._tokenize(text)
+        joined = " ".join(tokens)
+        diversity = DeterministicGrader._diversity_factor(tokens)
+        _match = DeterministicGrader._kw_matches
 
         # --- required (60 % weight) ---
         if spec.required:
-            req_hits = sum(1 for kw in spec.required if kw.lower() in text_lower)
+            req_hits = sum(1 for kw in spec.required if _match(kw, tokens, joined))
             req_ratio = req_hits / len(spec.required)
             meets_min = req_hits >= spec.min_required_hits
         else:
@@ -53,19 +92,19 @@ class DeterministicGrader:
 
         # --- optional (40 % weight) ---
         if spec.optional:
-            opt_hits = sum(1 for kw in spec.optional if kw.lower() in text_lower)
+            opt_hits = sum(1 for kw in spec.optional if _match(kw, tokens, joined))
             opt_ratio = opt_hits / len(spec.optional)
         else:
             opt_ratio = 1.0
 
-        quality = 0.60 * req_ratio + 0.40 * opt_ratio
+        quality = (0.60 * req_ratio + 0.40 * opt_ratio) * diversity
         if not meets_min:
             quality *= 0.5
 
         # --- forbidden ---
         penalty = 0.0
         if spec.forbidden:
-            forbid_hits = sum(1 for kw in spec.forbidden if kw.lower() in text_lower)
+            forbid_hits = sum(1 for kw in spec.forbidden if _match(kw, tokens, joined))
             penalty = -0.03 * forbid_hits
 
         return round(quality, 4), round(penalty, 4)

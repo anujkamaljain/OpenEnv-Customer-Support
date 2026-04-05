@@ -36,6 +36,11 @@ _ConcreteAction = (
     | RequestInfoAction
 )
 
+# Quality multiplier applied to keyword scores when the agent skips
+# request_info on a partial-info ticket.  Creates a speed-vs-quality
+# trade-off: skipping saves a step (less SLA risk) but caps quality.
+_INFO_SKIP_QUALITY_FACTOR = 0.6
+
 
 class CustomerSupportEnv:
     """Production-grade async environment for customer support triage.
@@ -99,7 +104,7 @@ class CustomerSupportEnv:
             )
 
         # --- dispatch & reward -------------------------------------------
-        reward, feedback = self._dispatch(state, parsed)
+        reward, feedback, breakdown = self._dispatch(state, parsed)
         reward += repeat_pen
 
         # --- SLA penalty -------------------------------------------------
@@ -117,6 +122,12 @@ class CustomerSupportEnv:
 
         # --- clamp -------------------------------------------------------
         reward = max(-0.25, min(reward, 0.30))
+
+        # --- reward breakdown --------------------------------------------
+        breakdown["repeat_penalty"] = repeat_pen
+        breakdown["sla_penalty"] = sla_pen
+        breakdown["total"] = round(reward, 4)
+        state.last_reward_breakdown = breakdown
 
         state.record_action(action_type, feedback, reward)
 
@@ -172,6 +183,7 @@ class CustomerSupportEnv:
         self, state: InternalState, label: str, feedback: str
     ) -> StepResult:
         reward = -0.05
+        state.last_reward_breakdown = {"penalty": reward, "total": reward}
         state.record_action(label, feedback, reward)
         return StepResult(
             observation=state.to_observation(),
@@ -194,7 +206,9 @@ class CustomerSupportEnv:
     # Action dispatch
     # ------------------------------------------------------------------
 
-    def _dispatch(self, state: InternalState, action: _ConcreteAction) -> tuple[float, str]:
+    _DispatchResult = tuple[float, str, dict[str, float]]
+
+    def _dispatch(self, state: InternalState, action: _ConcreteAction) -> _DispatchResult:
         if isinstance(action, ClassifyAction):
             return self._on_classify(state, action)
         if isinstance(action, RouteAction):
@@ -207,7 +221,7 @@ class CustomerSupportEnv:
             return self._on_resolve(state, action)
         if isinstance(action, RequestInfoAction):
             return self._on_request_info(state, action)
-        return -0.05, "Unrecognised action type."
+        return -0.05, "Unrecognised action type.", {"penalty": -0.05}
 
     # ------------------------------------------------------------------
     # Action handlers
@@ -215,7 +229,7 @@ class CustomerSupportEnv:
 
     def _on_classify(
         self, state: InternalState, action: ClassifyAction
-    ) -> tuple[float, str]:
+    ) -> _DispatchResult:
         ticket = state.ticket
         cat_ok = action.category == ticket.gold_category
         pri_ok = action.priority == ticket.gold_priority
@@ -223,71 +237,92 @@ class CustomerSupportEnv:
         state.phase = "classified"
 
         if cat_ok and pri_ok:
-            reward, feedback = 0.10, "Correct classification."
+            base, feedback = 0.10, "Correct classification."
         elif cat_ok:
-            reward = 0.06
+            base = 0.06
             feedback = f"Category correct; expected priority '{ticket.gold_priority}'."
         elif pri_ok:
-            reward = 0.04
+            base = 0.04
             feedback = f"Priority correct; expected category '{ticket.gold_category}'."
         else:
-            reward = 0.01
+            base = 0.01
             feedback = (
                 f"Incorrect. Expected '{ticket.gold_category}' / '{ticket.gold_priority}'."
             )
 
+        urgency_bonus = 0.0
         if pri_ok and ticket.gold_priority in ("critical", "high"):
-            reward += 0.10
+            urgency_bonus = 0.10
             state.urgency_handled = True
             feedback += " Urgency correctly identified (+0.10)."
 
-        return reward, feedback
+        reward = base + urgency_bonus
+        breakdown = {"classification": base, "urgency_bonus": urgency_bonus}
+        return reward, feedback, breakdown
 
     def _on_route(
         self, state: InternalState, action: RouteAction
-    ) -> tuple[float, str]:
+    ) -> _DispatchResult:
         correct = action.department == state.ticket.gold_department
         state.routing_correct = correct
         state.phase = "routed"
         if correct:
-            return 0.10, "Routed to the correct department."
-        return 0.01, f"Incorrect routing; expected '{state.ticket.gold_department}'."
+            return 0.10, "Routed to the correct department.", {"routing": 0.10}
+        return 0.01, f"Incorrect routing; expected '{state.ticket.gold_department}'.", {"routing": 0.01}
 
     def _on_respond(
         self, state: InternalState, action: RespondAction
-    ) -> tuple[float, str]:
+    ) -> _DispatchResult:
         ticket = state.ticket
         state.phase = "responding"
 
         quality, forbidden_pen = self._grader.weighted_keyword_score(
             action.response_text, ticket.response_spec
         )
+
+        info_factor = 1.0
+        if ticket.partial_info and not state.info_requested:
+            info_factor = _INFO_SKIP_QUALITY_FACTOR
+            quality *= info_factor
+
         base_reward = round(quality * 0.20, 4)
 
-        forbidden_pen *= ticket.penalty_multiplier
+        forbidden_pen = round(forbidden_pen * ticket.penalty_multiplier, 4)
         tone_pen = self._eval_tone_constraint(state, action.tone)
-        tone_pen *= ticket.penalty_multiplier
+        tone_pen = round(tone_pen * ticket.penalty_multiplier, 4)
 
         reward = base_reward + forbidden_pen + tone_pen
         state.response_quality_score = quality
 
         parts = [f"Response quality: {quality:.0%}."]
+        if info_factor < 1.0:
+            parts.append(
+                f"Incomplete information (factor {info_factor:.1f}): "
+                "customer clarification was not gathered."
+            )
         if forbidden_pen < 0:
             parts.append(f"Forbidden pattern penalty: {forbidden_pen:+.3f}.")
         if tone_pen < 0:
             parts.append("Tone constraint violated.")
-        return round(reward, 4), " ".join(parts)
+
+        breakdown: dict[str, float] = {
+            "response_quality": base_reward,
+            "incomplete_info_factor": info_factor,
+            "forbidden_penalty": forbidden_pen,
+            "tone_penalty": tone_pen,
+        }
+        return round(reward, 4), " ".join(parts), breakdown
 
     def _on_escalate(
         self, state: InternalState, action: EscalateAction
-    ) -> tuple[float, str]:
+    ) -> _DispatchResult:
         ticket = state.ticket
         state.phase = "escalated"
 
         if not ticket.requires_escalation:
             pen = round(-0.10 * ticket.penalty_multiplier, 4)
             state.escalation_score = 0.0
-            return pen, "Unnecessary escalation; ticket does not require it."
+            return pen, "Unnecessary escalation; ticket does not require it.", {"escalation": pen}
 
         team_ok = (
             ticket.escalation_target is not None
@@ -295,56 +330,79 @@ class CustomerSupportEnv:
         )
         if team_ok:
             state.escalation_score = 1.0
-            return 0.15, "Correctly escalated to the right team."
+            return 0.15, "Correctly escalated to the right team.", {"escalation": 0.15}
 
         state.escalation_score = 0.3
         return 0.05, (
             f"Escalation needed but target should be '{ticket.escalation_target}'."
-        )
+        ), {"escalation": 0.05}
 
     def _on_resolve(
         self, state: InternalState, action: ResolveAction
-    ) -> tuple[float, str]:
+    ) -> _DispatchResult:
         ticket = state.ticket
 
         quality, forbidden_pen = self._grader.weighted_keyword_score(
             action.resolution_summary, ticket.resolution_spec
         )
+
+        info_factor = 1.0
+        if ticket.partial_info and not state.info_requested:
+            info_factor = _INFO_SKIP_QUALITY_FACTOR
+            quality *= info_factor
+
         comp_score = self._grader.compensation_accuracy(
             action.offered_compensation, ticket.compensation_range
         )
         constraint_pen = self._eval_resolve_constraints(state, action)
 
-        # quality(0..1) * 0.15 + comp(0..1) * 0.05 + base 0.05 → max 0.25
-        raw = quality * 0.15 + comp_score * 0.05 + 0.05
-        penalties = (forbidden_pen + constraint_pen) * ticket.penalty_multiplier
+        quality_r = round(quality * 0.15, 4)
+        comp_r = round(comp_score * 0.05, 4)
+        base_r = 0.05
+        raw = quality_r + comp_r + base_r
+        forbidden_scaled = round(forbidden_pen * ticket.penalty_multiplier, 4)
+        constraint_scaled = round(constraint_pen * ticket.penalty_multiplier, 4)
 
-        reward = round(max(0.0, min(raw + penalties, 0.25)), 4)
+        reward = round(max(0.0, min(raw + forbidden_scaled + constraint_scaled, 0.25)), 4)
         state.resolution_quality_score = quality
 
         parts = [f"Resolution quality: {quality:.0%}."]
+        if info_factor < 1.0:
+            parts.append(
+                f"Incomplete information (factor {info_factor:.1f}): "
+                "customer clarification was not gathered."
+            )
         if forbidden_pen < 0:
             parts.append(f"Forbidden pattern penalty: {forbidden_pen:+.3f}.")
         if constraint_pen < 0:
             parts.append(f"Constraint penalty: {constraint_pen:+.3f}.")
         if comp_score < 1.0 and ticket.compensation_range is not None:
             parts.append("Compensation outside optimal range.")
-        return reward, " ".join(parts)
+
+        breakdown: dict[str, float] = {
+            "resolution_quality": quality_r,
+            "incomplete_info_factor": info_factor,
+            "compensation": comp_r,
+            "base": base_r,
+            "forbidden_penalty": forbidden_scaled,
+            "constraint_penalty": constraint_scaled,
+        }
+        return reward, " ".join(parts), breakdown
 
     def _on_request_info(
         self, state: InternalState, action: RequestInfoAction
-    ) -> tuple[float, str]:
+    ) -> _DispatchResult:
         ticket = state.ticket
 
         if ticket.partial_info and not state.info_requested:
             state.info_requested = True
             reveal = ticket.info_reveals or "No additional details available."
-            return 0.05, f"Customer clarification: {reveal}"
+            return 0.05, f"Customer clarification: {reveal}", {"info_bonus": 0.05}
 
         pen = round(-0.03 * ticket.penalty_multiplier, 4)
         if state.info_requested:
-            return pen, "No new information. Customer already provided clarification."
-        return pen, "Information requested. No additional details available (simulated)."
+            return pen, "No new information. Customer already provided clarification.", {"info_penalty": pen}
+        return pen, "Information requested. No additional details available (simulated).", {"info_penalty": pen}
 
     # ------------------------------------------------------------------
     # Constraint helpers

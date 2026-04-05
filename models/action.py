@@ -82,7 +82,3 @@ ACTION_CLASSES = (
     ResolveAction,
     RequestInfoAction,
 )
-
-ALL_ACTION_TYPES = frozenset(
-    ["classify", "route", "respond", "escalate", "resolve", "request_info"]
-)

@@ -1,6 +1,5 @@
 from models.action import (
     ACTION_CLASSES,
-    ALL_ACTION_TYPES,
     Action,
     ActionAdapter,
     ClassifyAction,
@@ -26,7 +25,6 @@ from models.ticket import (
 
 __all__ = [
     "ACTION_CLASSES",
-    "ALL_ACTION_TYPES",
     "Action",
     "ActionAdapter",
     "ActionRecord",

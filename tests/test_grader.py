@@ -83,26 +83,66 @@ class TestWeightedKeywordScore:
         quality, _ = DeterministicGrader.weighted_keyword_score("refund issued", spec)
         assert quality > 0.5
 
-    def test_substring_matching(self) -> None:
+    def test_stem_prefix_matching(self) -> None:
+        """Keyword stems match inflected forms via token-prefix."""
         spec = KeywordSpec(required=["apolog"], min_required_hits=1)
         quality, _ = DeterministicGrader.weighted_keyword_score(
             "We sincerely apologize", spec
         )
         assert quality > 0.5
 
+    def test_punctuation_stripping(self) -> None:
+        """Punctuation in text must not block keyword matches."""
+        spec = KeywordSpec(required=["refund", "apolog"], min_required_hits=2)
+        quality, _ = DeterministicGrader.weighted_keyword_score(
+            "We apologize! Your refund: $29.99.", spec
+        )
+        assert quality > 0.5
 
-# -- legacy keyword overlap (kept for compatibility) ---------------------
+    def test_token_boundary_prevents_false_match(self) -> None:
+        """Single-word keyword must not match mid-word (e.g. 'fix' in 'prefix')."""
+        spec = KeywordSpec(required=["fix"], min_required_hits=1)
+        q_false, _ = DeterministicGrader.weighted_keyword_score("This is a prefix", spec)
+        q_true, _ = DeterministicGrader.weighted_keyword_score("We will fix the bug", spec)
+        assert q_false < q_true
+        assert q_false < 0.5  # "fix" should NOT match "prefix"
+        assert q_true > 0.5
 
+    def test_multi_word_phrase_matching(self) -> None:
+        """Multi-word forbidden keywords match as contiguous phrases."""
+        spec = KeywordSpec(
+            required=["refund"],
+            forbidden=["not a bug"],
+            min_required_hits=1,
+        )
+        _, pen_match = DeterministicGrader.weighted_keyword_score(
+            "This is not a bug, please refund me", spec
+        )
+        _, pen_no_match = DeterministicGrader.weighted_keyword_score(
+            "This is not related; a bug was found. Refund issued.", spec
+        )
+        assert pen_match == pytest.approx(-0.03)
+        assert pen_no_match == 0.0  # words present but not contiguous
 
-class TestKeywordOverlap:
-    def test_all_match(self) -> None:
-        assert DeterministicGrader.keyword_overlap(
-            "refund duplicate charge process",
-            ["refund", "duplicate", "charge", "process"],
-        ) == 1.0
+    def test_diversity_penalty_on_repetition(self) -> None:
+        """Repeating a keyword should reduce quality via diversity factor."""
+        spec = KeywordSpec(required=["refund"], min_required_hits=1)
+        q_diverse, _ = DeterministicGrader.weighted_keyword_score(
+            "We will process your refund for the duplicate charge", spec
+        )
+        q_spam, _ = DeterministicGrader.weighted_keyword_score(
+            "refund refund refund refund refund refund", spec
+        )
+        assert q_spam < q_diverse
 
-    def test_empty_keywords(self) -> None:
-        assert DeterministicGrader.keyword_overlap("text", []) == 1.0
+    def test_normal_text_no_diversity_penalty(self) -> None:
+        """Well-written sentences should not incur diversity penalty."""
+        spec = KeywordSpec(required=["investigat", "crash"], min_required_hits=2)
+        quality, _ = DeterministicGrader.weighted_keyword_score(
+            "We are investigating the crash you reported when uploading files.",
+            spec,
+        )
+        assert quality == pytest.approx(1.0)
 
 
 # -- SLA penalty ---------------------------------------------------------

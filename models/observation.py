@@ -44,3 +44,4 @@ class Observation(BaseModel):
     # --- v2 fields ---
     sla_steps_remaining: int = 0
     customer_value: Literal["low", "medium", "high"] = "medium"
+    max_total_reward: float = 1.0

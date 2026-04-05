@@ -1,0 +1,24 @@
+name: customer_support_triage
+description: Real-world customer support triage simulation with classification, routing, response, escalation, and resolution
+version: "1.0.0"
+
+entrypoints:
+  http:
+    base_url: http://localhost:7860
+
+tasks:
+  - name: easy
+    description: classification + routing + resolution
+  - name: medium
+    description: classification + response + resolution
+  - name: hard
+    description: multi-turn reasoning with escalation, SLA, and policy constraints
+
+interface:
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
+
+requirements:
+  deterministic: true
+  max_steps: 10

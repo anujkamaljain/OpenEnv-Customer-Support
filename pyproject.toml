@@ -9,7 +9,14 @@ description = "OpenEnv async environment for customer support triage and resolut
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.5",
+    "openai>=1.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "openenv-core>=0.2.0",
 ]
+
+[project.scripts]
+server = "server.app:main"
 
 [project.optional-dependencies]
 dev = [
@@ -23,4 +30,4 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.hatch.build.targets.wheel]
-packages = ["env", "models", "tasks", "graders"]
+packages = ["env", "models", "tasks", "graders", "server"]
