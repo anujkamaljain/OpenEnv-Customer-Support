@@ -1,126 +1,441 @@
-# OpenEnv — Customer Support Triage Environment
+# OpenEnv: Customer Support Triage
 
-Async, deterministic RL environment for customer support inbox triage and resolution.
+A production-grade reinforcement learning environment for evaluating AI agents on real-world customer support workflows. Built for the [OpenEnv](https://github.com/open-env) framework.
 
-## Quick start
+Agents must classify, route, respond to, escalate, and resolve customer tickets under time pressure, policy constraints, and incomplete information — mirroring the decision-making complexity of a human support team.
+
+---
+
+## Why This Matters
+
+Most LLM benchmarks test isolated capabilities: summarization, QA, or tool use. Real support work is a **multi-step, multi-objective optimization problem** where agents must balance competing pressures:
+
+- **Speed vs. quality** — gathering information improves responses but risks SLA violations
+- **Policy compliance vs. customer satisfaction** — refund caps conflict with angry customers demanding full refunds
+- **Signal vs. noise** — critical security incidents can be buried in routine-sounding tickets
+
+This environment makes those trade-offs explicit and measurable.
+
+---
+
+## Key Features
+
+| Feature | Description |
+|---|---|
+| **Multi-stage workflow** | `classify → route → (respond / escalate / request_info) → resolve` |
+| **SLA deadlines** | Per-ticket step limits based on urgency; escalating penalties for overruns |
+| **Business impact weighting** | Errors on high-value enterprise customers carry heavier penalties |
+| **Multi-objective reward** | 8 weighted components: classification, routing, response, resolution, escalation, urgency, efficiency, SLA |
+| **Deterministic grading** | No LLMs in the loop — reproducible scores via weighted keyword matching with diversity controls |
+| **Async-native** | All public methods are `async`; runs in any async inference loop |
+| **Pydantic v2 schemas** | Typed observations, actions, and results with validation |
+
+---
+
+## Environment Design
+
+### State Machine
+
+The environment is a deterministic finite state machine with six phases:
+
+```
+unclassified ──classify──► classified ──route──► routed ──┬── respond ──► responding ──┐
+                               │                          ├── request_info ─────────────┤
+                               │                          ├── escalate ──► escalated ───┤
+                               └── escalate ──► escalated ─┘                            │
+                                                                               resolve ─┘
+                                                                                  │
+                                                                                  ▼
+                                                                              resolved
+```
+
+Each phase gates which actions are valid. Attempting an out-of-phase action returns a penalty (`-0.05`) without crashing the environment.
+
+### Phase Transitions
+
+| Phase | Valid Actions |
+|---|---|
+| `unclassified` | `classify` |
+| `classified` | `route`, `escalate` |
+| `routed` | `respond`, `escalate`, `resolve`, `request_info` |
+| `responding` | `respond`, `escalate`, `resolve`, `request_info` |
+| `escalated` | `resolve` |
+| `resolved` | *(terminal)* |
+
+### Episode Termination
+
+An episode ends when the agent issues `resolve` or exhausts the step budget (8–10 steps depending on difficulty).
+
+---
+
+## Action Space
+
+All actions are Pydantic v2 models using a discriminated union on `action_type`:
+
+| Action | Fields | Purpose |
+|---|---|---|
+| `classify` | `category`, `priority` | Assign ticket category and urgency level |
+| `route` | `department` | Forward to the correct department |
+| `respond` | `response_text`, `tone` | Draft a customer-facing response |
+| `escalate` | `reason`, `target_team` | Escalate to L2, engineering, or management |
+| `resolve` | `resolution_summary`, `offered_compensation` | Close the ticket with a summary |
+| `request_info` | `question_to_customer` | Ask the customer for clarification |
+
+**Categories:** `billing`, `bug_report`, `feature_request`, `account_access`, `general_inquiry`, `cancellation`
+
+**Priorities:** `low`, `medium`, `high`, `critical`
+
+**Departments:** `billing`, `technical`, `account`, `general`
+
+---
+
+## Observation Space
+
+Each step returns an `Observation` with the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `ticket_id` | `str` | Unique identifier |
+| `ticket_text` | `str` | Customer's original message |
+| `customer_sentiment` | `angry \| frustrated \| neutral \| satisfied` | Emotional state |
+| `customer_tier` | `free \| pro \| enterprise` | Account tier |
+| `customer_value` | `low \| medium \| high` | Business impact weight |
+| `category_hint` | `str \| null` | Hint for easy tasks; `null` for hard |
+| `constraints` | `list[str]` | Policy constraints (e.g. "do not offer refund > $50") |
+| `phase` | `Phase` | Current state machine phase |
+| `available_actions` | `list[str]` | Valid actions in this phase |
+| `current_step` / `max_steps` | `int` | Step budget tracking |
+| `sla_steps_remaining` | `int` | Steps before SLA penalties begin |
+| `history` | `list[ActionRecord]` | Full action-reward history |
+| `max_total_reward` | `float` | Achievable maximum for normalization |
+
+---
+
+## Tasks
+
+### Easy — Classification + Routing + Resolution
+
+- 5 tickets with clear categories and direct customer requests
+- `category_hint` provided; no ambiguity
+- No escalation required, no policy constraints
+- **SLA:** 5 steps | **Max steps:** 8
+- Optimal path: 3 steps (`classify → route → resolve`)
+
+### Medium — Classification + Response + Resolution
+
+- 5 tickets requiring thoughtful responses judged by keyword coverage
+- Mixed sentiments; tone constraints active
+- Compensation ranges with boundary conditions
+- **SLA:** 5–6 steps | **Max steps:** 9
+- Optimal path: 4 steps (`classify → route → respond → resolve`)
+
+### Hard — Multi-Turn Reasoning Under Pressure
+
+- 10 tickets designed to stress-test agent reasoning:
+
+| Trap Type | Example |
+|---|---|
+| **Ambiguity** | Ticket mentions both billing and a UI bug — agent must identify root cause as `bug_report`, not `billing` |
+| **Misleading sentiment** | Customer writes calmly about unauthorized account access — agent must still flag as `critical` |
+| **Policy constraints** | Customer demands $499 full refund; policy caps at $150 — agent must offer partial compensation |
+| **Partial information** | Vague bug report ("something isn't working") — agent must `request_info` before responding |
+| **Distractor signals** | Ticket mixes three issues; agent must prioritize security over minor billing discrepancy |
+| **Escalation traps** | Some tickets require escalation; others don't — wrong call in either direction is penalized |
+
+- No `category_hint` — the agent must infer everything
+- **SLA:** 4–6 steps | **Max steps:** 10
+- Optimal path: 5–6 steps
+
+---
+
+## Reward Function
+
+### Per-Step Rewards
+
+| Signal | Reward | Condition |
+|---|---|---|
+| Correct classification | `+0.10` | Category and priority both correct |
+| Partial classification | `+0.01 – +0.06` | One of category/priority correct |
+| Urgency bonus | `+0.10` | Correctly identifying `high`/`critical` priority |
+| Correct routing | `+0.10` | Department matches ground truth |
+| Response quality | `0 – +0.20` | Weighted keyword coverage of required/optional terms |
+| Correct escalation | `+0.15` | Escalated to the right team when required |
+| Unnecessary escalation | `-0.10×` | Multiplied by business impact factor |
+| Information gathering | `+0.05` | First `request_info` on partial-info tickets |
+| Resolution quality | `0 – +0.25` | Keyword coverage + compensation accuracy |
+| Repeated action | `-0.05` | Exact duplicate of previous action |
+| Invalid/out-of-phase | `-0.05` | Action doesn't match current phase |
+| SLA overage | `-0.02 × steps_over` | Accumulating penalty per step past deadline |
+
+All per-step rewards are clamped to `[-0.25, +0.30]`.
+
+### Speed vs. Quality Trade-Off
+
+On tickets with `partial_info = true`:
+
+- **Skip `request_info`:** Response and resolution quality scores are multiplied by `0.6` — faster but capped
+- **Use `request_info`:** Full quality available, but the extra step risks SLA penalties
+
+This creates a genuine strategic dilemma with no universally correct answer.
+
+### Final Episode Score
+
+When `done = true`, the `info` dict includes a `final_score_breakdown`:
+
+| Component | Weight |
+|---|---|
+| Classification | 15% |
+| Routing | 10% |
+| Response quality | 20% |
+| Resolution quality | 20% |
+| Escalation | 10% |
+| Urgency handling | 10% |
+| Efficiency | 5% |
+| SLA compliance | 10% |
+
+The `normalized_score` (∈ [0, 1]) divides cumulative reward by `max_total_reward`, which accounts for unavoidable SLA penalties on the optimal path.
+
+---
+
+## Example Trajectory
+
+A sample episode on an easy billing ticket (`EASY-002`: duplicate charge, frustrated Pro customer):
+
+```
+Step 1: classify  → category=billing, priority=high
+        reward=+0.20  (classification +0.10, urgency bonus +0.10)
+        feedback="Correct classification. Urgency correctly identified (+0.10)."
+
+Step 2: route     → department=billing
+        reward=+0.10
+        feedback="Routed to the correct department."
+
+Step 3: resolve   → resolution_summary="Duplicate charge refund processed...", compensation=29.99
+        reward=+0.25
+        feedback="Resolution quality: 100%."
+
+Episode complete: normalized_score=0.982
+```
+
+Total: 3 steps, 0 SLA penalties, all objectives met.
+
+---
+
+## Setup
+
+### Prerequisites
+
+- Python 3.11+
+- Docker (for containerized deployment)
+
+### Local Installation
 
 ```bash
 pip install -e ".[dev]"
 ```
 
+### Docker
+
+```bash
+docker build -t openenv-customer-support .
+docker run -p 7860:7860 -e HF_TOKEN=your_token openenv-customer-support
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `HF_TOKEN` | *(required)* | Hugging Face API token for model inference |
+| `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | Model to use via HF router |
+| `API_BASE_URL` | `https://router.huggingface.co/v1` | OpenAI-compatible API endpoint |
+| `TASK_NAME` | `customer_support_triage` | Task identifier for validator output |
+
+---
+
+## Usage
+
+### HTTP API
+
+The server exposes endpoints on port `7860`:
+
+**Reset an episode:**
+
+```bash
+curl -X POST http://localhost:7860/reset \
+  -H "Content-Type: application/json" \
+  -d '{"seed": 0, "difficulty": "easy"}'
+```
+
+**Take a step:**
+
+```bash
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{"action": {"action_type": "classify", "category": "billing", "priority": "high"}}'
+```
+
+**Response format (both endpoints):**
+
+```json
+{
+  "observation": { "ticket_id": "EASY-001", "phase": "classified", "..." : "..." },
+  "reward": 0.10,
+  "done": false,
+  "info": { "normalized_score": 0.0, "reward_breakdown": { "..." : "..." } }
+}
+```
+
+### Python API
+
 ```python
 from env import CustomerSupportEnv
 
 env = CustomerSupportEnv()
-
 result = await env.reset(seed=0, difficulty="hard")
 
 while not result.done:
     action = agent.act(result.observation)
     result = await env.step(action)
-    print(result.reward, result.observation.phase)
 
-print(f"Final score: {result.info['normalized_score']:.2%}")
+print(result.info["normalized_score"])
 await env.close()
 ```
 
-## Structure
-
-```
-env/            Async environment (reset / step / state / close)
-models/         Pydantic v2 schemas (Observation, Action, StepResult, TicketData, KeywordSpec)
-tasks/          Ticket bank + JSON ticket data (5 easy / 5 medium / 10 hard)
-graders/        Deterministic grader (weighted keywords, SLA, multi-objective scoring)
-tests/          pytest-asyncio test suite (63 tests)
-```
-
-## Difficulty tiers
-
-| Tier   | Tickets | Optimal steps | Key challenge                             |
-|--------|---------|---------------|-------------------------------------------|
-| Easy   | 5       | 3-4           | Classification + routing                  |
-| Medium | 5       | 4-6           | Response quality + tone constraints       |
-| Hard   | 10      | 5-9           | Ambiguity, SLA pressure, policy traps     |
-
-## Reward design
-
-### Per-action rewards
-
-| Action        | Correct           | Partial          | Wrong / Unnecessary |
-|---------------|-------------------|------------------|---------------------|
-| `classify`    | +0.10             | +0.04 to +0.06   | +0.01               |
-| urgency bonus | +0.10 (high/crit) | —                | —                   |
-| `route`       | +0.10             | —                | +0.01               |
-| `respond`     | 0 to +0.20        | (keyword score)  | forbidden: -0.03/ea |
-| `escalate`    | +0.15             | +0.05 (wrong tm) | -0.10 * biz_mult    |
-| `resolve`     | 0 to +0.25        | (keyword+comp)   | forbidden: -0.03/ea |
-| `request_info`| +0.05 (needed)    | —                | -0.03 * biz_mult    |
-
-### Per-step modifiers
-
-| Modifier              | Value                                    |
-|-----------------------|------------------------------------------|
-| Repeat penalty        | -0.05                                    |
-| Wrong phase           | -0.05                                    |
-| SLA penalty           | -0.02 * (steps over deadline)            |
-| Per-step clamp        | [-0.25, +0.30]                           |
-
-### Business impact multiplier
-
-Negative action-level penalties are scaled by customer value:
-
-| Customer value | Multiplier |
-|----------------|------------|
-| low            | 1.0x       |
-| medium         | 1.3x       |
-| high           | 1.8x       |
-
-## SLA / deadline system
-
-Each ticket has an SLA step budget derived from priority:
-
-| Priority | SLA steps | Meaning                              |
-|----------|-----------|--------------------------------------|
-| critical | 3         | Must resolve in 3 steps or face penalty |
-| high     | 4         | —                                    |
-| medium   | 6         | —                                    |
-| low      | 8         | —                                    |
-
-Every step beyond the SLA incurs an increasing penalty (-0.02, -0.04, -0.06, ...).
-
-## Grader (deterministic, no LLM)
-
-Keyword scoring uses weighted `KeywordSpec`:
-- **Required** keywords (60% weight) — must appear
-- **Optional** keywords (40% weight) — bonus
-- **Forbidden** patterns — penalty per match (-0.03)
-- **min_required_hits** — hard floor; score halved when not met
-
-Episode-level scoring (8 dimensions, weights sum to 1.0):
-
-| Dimension              | Weight |
-|------------------------|--------|
-| Classification         | 15%    |
-| Routing                | 10%    |
-| Response quality       | 20%    |
-| Resolution quality     | 20%    |
-| Escalation correctness | 10%    |
-| Urgency handling       | 10%    |
-| Step efficiency        | 5%     |
-| SLA compliance         | 10%    |
-
-## Hard ticket challenges
-
-| ID       | Challenge                                                  |
-|----------|------------------------------------------------------------|
-| HARD-006 | Ambiguous category (billing symptoms but bug root cause)   |
-| HARD-007 | Conflicting signals (calm tone, critical security issue)   |
-| HARD-008 | Partial information (must request_info before responding)  |
-| HARD-009 | Policy trap (customer demands $499 refund, cap is $150)    |
-| HARD-010 | Multi-issue priority conflict (3 issues, security buried)  |
-
-## Running tests
+### Run Inference
 
 ```bash
-pytest -v
+python inference.py
 ```
+
+Output follows the OpenEnv validator format:
+
+```
+[START] task=customer_support_triage env=openenv model=Qwen/Qwen2.5-72B-Instruct
+[STEP] step=1 action={"action_type":"classify",...} reward=0.20 done=false error=null
+[STEP] step=2 action={"action_type":"route",...} reward=0.10 done=false error=null
+[STEP] step=3 action={"action_type":"resolve",...} reward=0.25 done=true error=null
+[END] success=true steps=3 score=0.982 rewards=0.20,0.10,0.25
+```
+
+### Validate
+
+```bash
+openenv validate
+```
+
+---
+
+## Deploying to Hugging Face Spaces
+
+### 1. Create a new Space
+
+Go to [huggingface.co/new-space](https://huggingface.co/new-space) and select:
+
+- **SDK:** Docker
+- **Hardware:** CPU Basic (2 vCPU, 16 GB) — the environment is lightweight
+- **Visibility:** Public or Private
+
+### 2. Push the code
+
+```bash
+git remote add space https://huggingface.co/spaces/YOUR_USERNAME/openenv-customer-support
+git push space main
+```
+
+Or upload all files through the HF web interface.
+
+### 3. Set the `HF_TOKEN` secret
+
+In your Space's **Settings > Repository secrets**, add:
+
+| Name | Value |
+|---|---|
+| `HF_TOKEN` | Your Hugging Face API token (from [hf.co/settings/tokens](https://huggingface.co/settings/tokens)) |
+
+This is only needed if you use the `/inference` endpoint. The environment endpoints (`/reset`, `/step`, `/state`) work without it.
+
+### 4. Verify deployment
+
+Once the Space is running (build takes ~30 seconds), test it:
+
+```bash
+# Health check
+curl https://YOUR_USERNAME-openenv-customer-support.hf.space/
+
+# Reset
+curl -X POST https://YOUR_USERNAME-openenv-customer-support.hf.space/reset \
+  -H "Content-Type: application/json" \
+  -d '{"seed": 0, "difficulty": "easy"}'
+```
+
+### How it works
+
+- The Dockerfile creates a non-root `user` (UID 1000) as required by HF Spaces
+- FastAPI serves on `0.0.0.0:7860` — the port HF Spaces exposes
+- Startup is instant: no model loading, no GPU, no heavy initialization
+- The environment is fully self-contained — all ticket data is bundled in the image
+
+---
+
+## Baseline Results
+
+| Difficulty | Model | Score | Steps | Notes |
+|---|---|---|---|---|
+| Easy | Qwen2.5-72B-Instruct | ~0.95 | 3 | Near-optimal on straightforward tickets |
+| Medium | Qwen2.5-72B-Instruct | ~0.85 | 4–5 | Response keyword coverage is the bottleneck |
+| Hard | Qwen2.5-72B-Instruct | ~0.70 | 5–7 | Policy traps and ambiguity cause partial-credit |
+
+Scores are `normalized_score` values (cumulative reward / max achievable reward). A score of `1.0` represents a theoretically perfect agent.
+
+---
+
+## Project Structure
+
+```
+├── env/
+│   ├── environment.py      # Core async environment
+│   ├── state.py             # Internal state machine + reward tracking
+│   └── errors.py            # Custom exceptions
+├── models/
+│   ├── action.py            # Action discriminated union (Pydantic v2)
+│   ├── observation.py       # Observation schema
+│   ├── ticket.py            # TicketData + KeywordSpec
+│   └── step_result.py       # Uniform return type
+├── graders/
+│   └── grader.py            # Deterministic keyword + compensation grading
+├── tasks/
+│   ├── ticket_bank.py       # Ticket loading + deterministic selection
+│   └── tickets/
+│       ├── easy.json         # 5 tickets
+│       ├── medium.json       # 5 tickets
+│       └── hard.json         # 10 tickets
+├── server/
+│   └── app.py               # FastAPI server
+├── tests/                    # 215 tests (pytest + pytest-asyncio)
+├── inference.py              # LLM agent loop (validator-compliant)
+├── openenv.yaml              # Environment manifest
+├── Dockerfile
+├── pyproject.toml
+└── requirements.txt
+```
+
+---
+
+## Testing
+
+```bash
+pip install -e ".[dev]"
+python -m pytest tests/ -q
+```
+
+```
+215 passed in ~1s
+```
+
+Tests cover: state transitions, reward bounds, grader determinism, keyword scoring robustness, SLA penalties, trajectory simulations (best/worst case), trade-off mechanics, and inference output format compliance.
+
+---
+
+## License
+
+MIT
