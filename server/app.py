@@ -277,7 +277,13 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       letter-spacing: 0.03em;
     }
     button.exec { background: var(--exec); color: #fff; }
-    button.exec:hover { background: var(--exec-hover); }
+    button.exec:hover:not(:disabled) { background: var(--exec-hover); }
+    button.exec:disabled {
+      background: #495057;
+      color: #868e96;
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
     button.secondary { background: #495057; color: #fff; }
     button.secondary:hover { background: #5c636a; }
     .metrics {
@@ -750,6 +756,11 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
   const mStat = $("mStatus");
 
   let totalReward = 0;
+  let episodeActive = false;
+
+  function syncStepButton() {
+    $("btnStep").disabled = !episodeActive;
+  }
 
   function pretty(obj) {
     return JSON.stringify(obj, null, 2);
@@ -1004,6 +1015,8 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       return;
     }
     totalReward = 0;
+    episodeActive = true;
+    syncStepButton();
     showPayload(data, {});
     mLast.textContent = "0.00";
     mTotal.textContent = "0.00";
@@ -1018,11 +1031,19 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       setStatus((data && data.detail) || raw || res.statusText, true);
       return;
     }
+    if (data.observation != null) {
+      episodeActive = !data.done;
+    }
+    syncStepButton();
     showPayload(data, {});
     setStatus("GET /state → " + res.status);
   }
 
   async function doStep() {
+    if (!episodeActive) {
+      setStatus("Call Reset before executing a step.", true);
+      return;
+    }
     const action = buildAction();
     syncJsonPreview();
     setStatus("POST /step …");
@@ -1037,6 +1058,10 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       setStatus(String(detail || raw || res.statusText), true);
       return;
     }
+    if (data.done) {
+      episodeActive = false;
+      syncStepButton();
+    }
     showPayload(data, { addStepReward: true });
     setStatus("POST /step → " + res.status);
   }
@@ -1046,6 +1071,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
   $("btnStep").addEventListener("click", () => { doStep().catch((e) => setStatus(String(e), true)); });
 
   showFieldGroups();
+  syncStepButton();
 })();
   </script>
 </body>
