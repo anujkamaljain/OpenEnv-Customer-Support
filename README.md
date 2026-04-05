@@ -20,6 +20,8 @@ Agents must classify, route, respond to, escalate, and resolve customer tickets 
 
 **Live deployment:** [anuj2209-openenv-customer-support.hf.space](https://anuj2209-openenv-customer-support.hf.space)
 
+**Repository:** [github.com/anujkamaljain/OpenEnv-Customer-Support](https://github.com/anujkamaljain/OpenEnv-Customer-Support)
+
 ---
 
 ## Why This Matters
@@ -247,6 +249,8 @@ Total: 3 steps, 0 SLA penalties, all objectives met.
 ### Local Installation
 
 ```bash
+git clone https://github.com/anujkamaljain/OpenEnv-Customer-Support.git
+cd OpenEnv-Customer-Support
 pip install -e ".[dev]"
 ```
 

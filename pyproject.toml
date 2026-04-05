@@ -24,6 +24,9 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 
+[project.urls]
+Repository = "https://github.com/anujkamaljain/OpenEnv-Customer-Support"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
