@@ -2,6 +2,7 @@
 
 Endpoints:
     GET  /              — browser debug UI (HTML)
+    GET  /docs          — interactive OpenAPI (Swagger UI, dark theme)
     POST /reset         — start a new episode
     POST /step          — apply an action
     GET  /state         — read current state without advancing
@@ -17,12 +18,138 @@ from contextlib import redirect_stdout
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.openapi.docs import get_swagger_ui_html, swagger_ui_default_parameters
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from env.environment import CustomerSupportEnv
 
-app = FastAPI(title="OpenEnv Customer Support", version="0.1.0")
+app = FastAPI(
+    title="OpenEnv Customer Support",
+    version="0.1.0",
+    description=(
+        "Real-world customer support ticket triage environment. "
+        "An agent learns to classify, prioritize, and route support tickets."
+    ),
+    docs_url=None,
+)
+
+_SWAGGER_UI_DARK_STYLE = """
+<style id="openenv-swagger-dark">
+  html { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: inherit; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: #141517;
+  }
+  .swagger-ui .topbar { display: none; }
+  .swagger-ui .information-container,
+  .swagger-ui .scheme-container,
+  .swagger-ui .wrapper {
+    background: transparent;
+  }
+  .swagger-ui .info .title { color: #f8f9fa; }
+  .swagger-ui .info p,
+  .swagger-ui .info li,
+  .swagger-ui .info .base-url { color: #adb5bd; }
+  .swagger-ui .info h1, .swagger-ui .info h2, .swagger-ui .info h3,
+  .swagger-ui .info h4, .swagger-ui .info h5 { color: #e9ecef; }
+  .swagger-ui .scheme-container {
+    background: #25262b;
+    box-shadow: none;
+    border: 1px solid #373a40;
+  }
+  .swagger-ui .opblock-tag {
+    color: #e9ecef;
+    border-bottom: 1px solid #373a40;
+    font-size: 1.05rem;
+  }
+  .swagger-ui .opblock {
+    border-color: #373a40;
+    background: #1a1b1e;
+    border-radius: 6px;
+    margin: 0 0 0.75rem;
+    box-shadow: none;
+  }
+  .swagger-ui .opblock .opblock-summary {
+    border-color: #373a40;
+  }
+  .swagger-ui .opblock .opblock-summary-method { min-width: 4.5rem; }
+  .swagger-ui .opblock-body {
+    background: #141517;
+    border-top: 1px solid #373a40;
+  }
+  .swagger-ui .opblock-description-wrapper p,
+  .swagger-ui .opblock-title { color: #dee2e6; }
+  .swagger-ui .parameter__name,
+  .swagger-ui .parameter__type,
+  .swagger-ui .response-col_status { color: #ced4da; }
+  .swagger-ui table thead tr td,
+  .swagger-ui table thead tr th {
+    color: #adb5bd;
+    border-color: #373a40;
+    font-weight: 600;
+  }
+  .swagger-ui table tbody tr td {
+    border-color: #373a40;
+    color: #e9ecef;
+  }
+  .swagger-ui .model-box,
+  .swagger-ui section.models {
+    background: #1a1b1e;
+    border-color: #373a40;
+  }
+  .swagger-ui .model { color: #dee2e6; }
+  .swagger-ui .prop-type { color: #74c0fc; }
+  .swagger-ui input,
+  .swagger-ui textarea,
+  .swagger-ui select,
+  .swagger-ui .dialog-ux .modal-ux {
+    background: #1a1b1e !important;
+    border-color: #373a40 !important;
+    color: #e9ecef !important;
+  }
+  .swagger-ui .btn {
+    background: #495057;
+    color: #fff;
+    border-color: #5c636a;
+  }
+  .swagger-ui .btn.cancel { background: #373a40; }
+  .swagger-ui .btn.execute { background: #2b8a3e; border-color: #37b24d; }
+  .swagger-ui .response-content-type,
+  .swagger-ui .tab li { color: #adb5bd; }
+  .swagger-ui .response-col_description__inner div.markdown p,
+  .swagger-ui .response-col_description__inner div.markdown { color: #ced4da; }
+  .swagger-ui .highlight-code > .microlight,
+  .swagger-ui .microlight,
+  .swagger-ui .highlight-code pre {
+    background: #121214 !important;
+    color: #e9ecef !important;
+    border: 1px solid #2c2e33 !important;
+  }
+  .swagger-ui .curl-command .copy-to-clipboard { filter: invert(0.85); }
+  .swagger-ui .filter .operation-filter-input {
+    border: 1px solid #373a40;
+    background: #1a1b1e;
+    color: #e9ecef;
+  }
+  .swagger-ui .errors-wrapper { background: #3d1f1f; border-color: #c92a2a; }
+  .openenv-docs-bar {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #25262b;
+    border-bottom: 1px solid #373a40;
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+  }
+  .openenv-docs-bar a {
+    color: #4c6ef5;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .openenv-docs-bar a:hover { text-decoration: underline; }
+</style>
+"""
 
 _env = CustomerSupportEnv()
 
@@ -377,13 +504,58 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       border-radius: 6px;
       border: 1px dashed #3d4049;
     }
+
+    .page-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.25rem;
+    }
+    .page-head-text { flex: 1; min-width: 12rem; }
+    .page-head-text h1 { margin-bottom: 0.25rem; }
+    .page-head-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      align-items: center;
+    }
+    a.btn-mini {
+      display: inline-block;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #fdfd96;
+      color: #111;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      line-height: 1.2;
+    }
+    a.btn-mini:hover { filter: brightness(1.06); }
+    a.btn-mini:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Customer Support Command Center</h1>
-    <p class="sub">Classify → route → respond / escalate / request info → resolve ·
-      <a href="/health" style="color:var(--accent)">/health</a></p>
+    <header class="page-head">
+      <div class="page-head-text">
+        <h1>Customer Support Command Center</h1>
+        <p class="sub">Classify → route → respond / escalate / request info → resolve ·
+          <a href="/health" style="color:var(--accent)">/health</a></p>
+      </div>
+      <div class="page-head-actions">
+        <a class="btn-mini" href="/docs" target="_blank" rel="noopener noreferrer">Docs</a>
+      </div>
+    </header>
 
     <div class="metrics panel" style="padding:0.85rem;margin-bottom:1rem;background:#1a1b1e;border-style:dashed">
       <div class="metric blue">
@@ -866,7 +1038,32 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
 """
 
 
+def _swagger_ui_dark_response() -> HTMLResponse:
+    """Interactive OpenAPI (Swagger UI) with dark styling aligned to the Command Center."""
+    swagger_params = swagger_ui_default_parameters.copy()
+    swagger_params["syntaxHighlight"] = {"activated": True, "theme": "obsidian"}
+    html = get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} — API",
+        swagger_ui_parameters=swagger_params,
+        oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+    )
+    text = html.body.decode("utf-8")
+    text = text.replace("</head>", f"{_SWAGGER_UI_DARK_STYLE}</head>", 1)
+    text = text.replace(
+        "<body>",
+        '<body><nav class="openenv-docs-bar"><a href="/">← Command Center</a></nav>',
+        1,
+    )
+    return HTMLResponse(content=text)
+
+
 # ── routes ───────────────────────────────────────────────────────────────────
+
+
+@app.get("/docs", include_in_schema=False)
+async def swagger_ui_html() -> HTMLResponse:
+    return _swagger_ui_dark_response()
 
 
 @app.get("/", response_class=HTMLResponse)
