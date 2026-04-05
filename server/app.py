@@ -19,16 +19,37 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from env.environment import CustomerSupportEnv
+from models.action import Action
+
+_OPENAPI_TAGS = [
+    {
+        "name": "Environment",
+        "description": (
+            "Episode lifecycle for the customer-support RL environment: "
+            "call **reset** before **step**; use **state** to inspect without advancing."
+        ),
+    },
+    {
+        "name": "Interface",
+        "description": "Browser UI for manual debugging (HTML, not JSON).",
+    },
+    {
+        "name": "System",
+        "description": "Health checks and optional batch inference (requires server env configuration).",
+    },
+]
 
 app = FastAPI(
     title="OpenEnv Customer Support",
     version="0.1.0",
+    openapi_tags=_OPENAPI_TAGS,
     description=(
-        "Real-world customer support ticket triage environment. "
-        "An agent learns to classify, prioritize, and route support tickets."
+        "Real-world customer support **ticket triage** environment for [OpenEnv](https://github.com/open-env). "
+        "Typical workflow: **classify** → **route** → **respond** / **escalate** / **request_info** → **resolve**. "
+        "`difficulty` on reset must be `easy`, `medium`, `hard`, or omitted to sample from all pools."
     ),
 )
 
@@ -39,30 +60,70 @@ _env = CustomerSupportEnv()
 
 
 class ResetRequest(BaseModel):
-    """POST /reset body. Valid ``difficulty`` values are easy, medium, hard, or omitted for all pools."""
+    """Start a new episode; same ``seed`` and ``difficulty`` yields the same ticket."""
 
-    seed: int = Field(default=0, description="Deterministic ticket index within the selected pool.")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"seed": 0, "difficulty": "easy"},
+                {"seed": 0, "difficulty": None},
+            ]
+        }
+    )
+
+    seed: int = Field(
+        default=0,
+        description="Index into the ticket pool (modulo pool size). With `difficulty` omitted, indexes the combined bank.",
+    )
     difficulty: Literal["easy", "medium", "hard"] | None = Field(
         default=None,
-        description='Ticket pool filter, or omit / null for all difficulties.',
+        description="Use only tickets from this pool, or omit / `null` to include easy, medium, and hard.",
     )
 
 
 class StepRequest(BaseModel):
-    action: dict[str, Any]
+    """Apply one agent action. Must match the current phase (see `observation.phase` and `available_actions`)."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "action": {
+                    "action_type": "classify",
+                    "category": "general_inquiry",
+                    "priority": "medium",
+                }
+            }
+        }
+    )
+
+    action: Action = Field(
+        description=(
+            "Discriminated union on `action_type`: classify, route, respond, escalate, "
+            "request_info, resolve. Wrong shape → **422**; wrong phase → **200** with a penalty in `reward`."
+        ),
+    )
 
 
 class EnvResponse(BaseModel):
-    observation: dict[str, Any]
-    reward: float
-    done: bool
-    info: dict[str, Any]
+    """Observation and reward after reset, step, or state."""
+
+    observation: dict[str, Any] | None = Field(
+        description="Ticket + phase + history. `null` only from GET /state when reset has not been called yet.",
+    )
+    reward: float = Field(description="Reward for the last transition; 0 on reset and on GET /state.")
+    done: bool = Field(description="True after a terminal resolve (episode finished).")
+    info: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Diagnostics (e.g. difficulty, last feedback, reward breakdown).",
+    )
 
 
 class InferenceResponse(BaseModel):
-    stdout: str
-    score: float
-    success: bool
+    """Output from running the bundled LLM inference script once."""
+
+    stdout: str = Field(description="Captured stdout from `inference.run()` (validator-style log lines).")
+    score: float = Field(description="Parsed from the final `[END]` line when present; else 0.0.")
+    success: bool = Field(description="Parsed from the final `[END]` line when present; else false.")
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -927,18 +988,35 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
 # ── routes ───────────────────────────────────────────────────────────────────
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get(
+    "/",
+    response_class=HTMLResponse,
+    tags=["Interface"],
+    summary="Web Command Center",
+)
 def ui() -> HTMLResponse:
+    """Browser debug UI (HTML). Use **GET /** in the browser; API clients should use JSON endpoints below."""
     return HTMLResponse(content=_DEBUG_UI_HTML)
 
 
-@app.get("/health")
+@app.get("/health", tags=["System"], summary="Health check")
 async def health() -> dict[str, str]:
+    """Return `{\"status\": \"ok\"}` when the server is up."""
     return {"status": "ok"}
 
 
-@app.post("/reset", response_model=EnvResponse)
+@app.post(
+    "/reset",
+    response_model=EnvResponse,
+    tags=["Environment"],
+    summary="Reset episode",
+    response_description="Initial observation, zero reward, `done` false.",
+    responses={
+        400: {"description": "Bad request (e.g. empty ticket pool for the given filter)."},
+    },
+)
 async def reset(req: ResetRequest | None = None) -> dict[str, Any]:
+    """Start a new episode with a deterministically selected ticket. Body is optional (`seed=0`, all difficulties)."""
     if req is None:
         req = ResetRequest()
     try:
@@ -948,31 +1026,53 @@ async def reset(req: ResetRequest | None = None) -> dict[str, Any]:
     return _result_to_dict(result)
 
 
-@app.post("/step", response_model=EnvResponse)
+@app.post(
+    "/step",
+    response_model=EnvResponse,
+    tags=["Environment"],
+    summary="Step environment",
+    responses={
+        422: {"description": "Action JSON does not match the documented action schemas."},
+    },
+)
 async def step(req: StepRequest) -> dict[str, Any]:
+    """Apply one agent action. Invalid **phase** actions still return HTTP 200 with a penalty in `reward`."""
     try:
         result = await _env.step(req.action)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _result_to_dict(result)
 
 
-@app.get("/state")
-async def state() -> dict[str, Any] | None:
+@app.get(
+    "/state",
+    response_model=EnvResponse,
+    tags=["Environment"],
+    summary="Get state",
+)
+async def state() -> dict[str, Any]:
+    """Read the current observation without advancing time. If `reset` was never called, `observation` is `null`."""
     result = await _env.state()
     if result is None:
         return {"observation": None, "reward": 0.0, "done": False, "info": {}}
     return _result_to_dict(result)
 
 
-@app.post("/close")
+@app.post("/close", tags=["Environment"], summary="Close episode")
 async def close() -> dict[str, str]:
+    """Release the current episode; call **reset** before stepping again."""
     await _env.close()
     return {"status": "closed"}
 
 
-@app.post("/inference", response_model=InferenceResponse)
+@app.post(
+    "/inference",
+    response_model=InferenceResponse,
+    tags=["System"],
+    summary="Run inference benchmark",
+)
 async def inference_endpoint() -> dict[str, Any]:
+    """Execute the bundled LLM inference loop once. Requires server-side env (e.g. `HF_TOKEN`); see project README."""
     import inference
 
     buf = io.StringIO()
