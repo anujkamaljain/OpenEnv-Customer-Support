@@ -1,3 +1,15 @@
+---
+title: OpenEnv Customer Support
+emoji: 🌍
+colorFrom: purple
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: Real-world customer support triage environment
+---
+
 # OpenEnv: Customer Support Triage
 
 A production-grade reinforcement learning environment for evaluating AI agents on real-world customer support workflows. Built for the [OpenEnv](https://github.com/open-env) framework.
