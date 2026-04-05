@@ -77,9 +77,9 @@ async def health() -> dict[str, str]:
 
 @app.post("/reset", response_model=EnvResponse)
 async def reset(req: ResetRequest | None = None) -> dict[str, Any]:
-    seed = req.seed if req else 0
-    difficulty = req.difficulty if req else None
-    result = await _env.reset(seed=seed, difficulty=difficulty)
+    if req is None:
+        req = ResetRequest()
+    result = await _env.reset(seed=req.seed, difficulty=req.difficulty)
     return _result_to_dict(result)
 
 
