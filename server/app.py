@@ -271,6 +271,18 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       background: #252830 !important;
       border-color: #3d4150 !important;
     }
+    .timeline-scroll {
+      max-height: 18rem;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      scrollbar-color: #5c636a #1a1b1e;
+    }
+    .timeline-scroll::-webkit-scrollbar { width: 8px; }
+    .timeline-scroll::-webkit-scrollbar-track { background: #1a1b1e; border-radius: 4px; }
+    .timeline-scroll::-webkit-scrollbar-thumb { background: #5c636a; border-radius: 4px; }
+    .timeline-scroll::-webkit-scrollbar-thumb:hover { background: #868e96; }
     .timeline-list { display: flex; flex-direction: column; gap: 0.5rem; }
     .timeline-item {
       background: #121214;
@@ -361,18 +373,13 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       </div>
     </div>
 
-    <h2 class="section-title">Action Timeline</h2>
-    <div class="panel timeline-panel">
-      <div class="timeline-list" id="timelineList">
-        <div class="timeline-empty">No actions yet. Run <strong>Reset</strong>, then <strong>Execute step</strong>.</div>
-      </div>
-    </div>
-
     <div class="panel">
       <div class="hint-bar">
         Follow the env phase: start with <strong>classify</strong>, then <strong>route</strong>, then optional
         <strong>respond</strong> / <strong>escalate</strong> / <strong>request_info</strong>, then <strong>resolve</strong>.
         Use <strong>Get state</strong> to see <code>available_actions</code>.
+        <strong>Ticket difficulty:</strong> reset with <code>seed=0</code> and no filter always picks the first ticket in the bank (easy).
+        Choose <strong>medium</strong> / <strong>hard</strong> below, or with “any” use <strong>seed ≥ 5</strong> to leave the easy pool (5 easy tickets: seeds 0–4).
       </div>
       <h2>Step-by-step action</h2>
       <label for="actionType">Action type <span class="hint">(matches POST /step JSON)</span></label>
@@ -473,10 +480,35 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
         <textarea id="actionJson" readonly spellcheck="false"></textarea>
       </div>
 
+      <div class="form-grid cols-2" style="margin-top:0.85rem">
+        <div>
+          <label for="resetDifficulty">Reset · difficulty <span class="hint">(empty = all pools; seed 0 = first easy)</span></label>
+          <select id="resetDifficulty">
+            <option value="">Any — seed walks easy → medium → hard</option>
+            <option value="easy">easy only</option>
+            <option value="medium">medium only</option>
+            <option value="hard">hard only</option>
+          </select>
+        </div>
+        <div>
+          <label for="resetSeed">Reset · seed</label>
+          <input type="number" id="resetSeed" value="0" step="1" />
+        </div>
+      </div>
+
       <div class="btn-row">
         <button type="button" class="exec" id="btnStep">Execute step</button>
         <button type="button" class="secondary" id="btnReset">Reset</button>
         <button type="button" class="secondary" id="btnState">Get state</button>
+      </div>
+    </div>
+
+    <h2 class="section-title">Action Timeline</h2>
+    <div class="panel timeline-panel">
+      <div class="timeline-scroll">
+        <div class="timeline-list" id="timelineList">
+          <div class="timeline-empty">No actions yet. Run <strong>Reset</strong>, then <strong>Execute step</strong>.</div>
+        </div>
       </div>
     </div>
 
@@ -602,7 +634,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
     return actionTaken.length > 56 ? actionTaken.slice(0, 53) + "…" : actionTaken;
   }
 
-  function renderTicket(obs) {
+  function renderTicket(obs, info) {
     const body = $("ticketBody");
     const pills = $("ticketPills");
     pills.innerHTML = "";
@@ -628,6 +660,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       pills.appendChild(p);
     }
 
+    if (info && info.difficulty) addPill("Difficulty", String(info.difficulty));
     const impact = (obs.customer_value || "").toString().toUpperCase();
     addPill("Impact", impact);
     addPill("ID", obs.ticket_id);
@@ -697,7 +730,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
     outDone.textContent = String(data.done);
     outInfo.textContent = pretty(data.info != null ? data.info : {});
 
-    renderTicket(obs);
+    renderTicket(obs, data.info);
     renderTimeline(obs);
 
     mLast.textContent = Number(data.reward).toFixed(2);
@@ -728,10 +761,15 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
 
   async function doReset() {
     setStatus("POST /reset …");
+    const seedRaw = parseInt($("resetSeed").value, 10);
+    const seed = Number.isFinite(seedRaw) ? seedRaw : 0;
+    const diff = $("resetDifficulty").value;
+    const payload = { seed: seed };
+    if (diff) payload.difficulty = diff;
     const res = await fetch("/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify(payload),
     });
     const { ok, data, raw } = await parseJsonResponse(res);
     if (!ok || !data) {
