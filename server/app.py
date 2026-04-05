@@ -312,6 +312,46 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
     .tag { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.25rem; }
     #status { font-size: 0.8rem; min-height: 1.25rem; margin: 0.5rem 0; }
     #status.err { color: var(--danger); }
+
+    /* Fixed toasts — errors visible without scrolling past the timeline */
+    #toast-root {
+      position: fixed;
+      top: 0.75rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.45rem;
+      max-width: min(38rem, calc(100vw - 1.5rem));
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      margin: 0;
+      padding: 0.65rem 1rem;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(250, 82, 82, 0.45);
+      background: #3b1219;
+      color: #ffc9c9;
+      opacity: 0;
+      transform: translateY(-0.4rem);
+      transition: opacity 0.22s ease, transform 0.22s ease;
+      cursor: pointer;
+      word-break: break-word;
+    }
+    .toast.toast-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .toast:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
     .json-preview label { margin-top: 0.75rem; }
     #actionJson { min-height: 5rem; opacity: 0.92; }
     footer { margin-top: 1.25rem; font-size: 0.72rem; color: var(--muted); }
@@ -492,6 +532,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
+  <div id="toast-root" aria-live="assertive" aria-relevant="additions"></div>
   <div class="wrap">
     <header class="page-head">
       <div class="page-head-text">
@@ -697,6 +738,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
   <script>
 (function () {
   const $ = (id) => document.getElementById(id);
+  const toastRoot = $("toast-root");
   const status = $("status");
   const outObs = $("outObs");
   const outReward = $("outReward");
@@ -904,9 +946,35 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
     mStat.textContent = data.done ? "DONE" : "RUNNING";
   }
 
+  function showErrorToast(msg) {
+    if (!msg || !toastRoot) return;
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.textContent = msg;
+    el.setAttribute("role", "alert");
+    el.tabIndex = 0;
+    el.title = "Click to dismiss";
+    toastRoot.appendChild(el);
+    requestAnimationFrame(function () {
+      el.classList.add("toast-visible");
+    });
+    function dismiss() {
+      el.classList.remove("toast-visible");
+      setTimeout(function () {
+        el.remove();
+      }, 280);
+    }
+    const t = window.setTimeout(dismiss, 8500);
+    el.addEventListener("click", function () {
+      window.clearTimeout(t);
+      dismiss();
+    });
+  }
+
   function setStatus(msg, isErr) {
     status.textContent = msg || "";
     status.className = isErr ? "err" : "";
+    if (isErr && msg) showErrorToast(msg);
   }
 
   async function parseJsonResponse(res) {
