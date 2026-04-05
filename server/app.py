@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import io
 from contextlib import redirect_stdout
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from env.environment import CustomerSupportEnv
 
@@ -39,8 +39,13 @@ _env = CustomerSupportEnv()
 
 
 class ResetRequest(BaseModel):
-    seed: int = 0
-    difficulty: str | None = None
+    """POST /reset body. Valid ``difficulty`` values are easy, medium, hard, or omitted for all pools."""
+
+    seed: int = Field(default=0, description="Deterministic ticket index within the selected pool.")
+    difficulty: Literal["easy", "medium", "hard"] | None = Field(
+        default=None,
+        description='Ticket pool filter, or omit / null for all difficulties.',
+    )
 
 
 class StepRequest(BaseModel):
@@ -936,7 +941,10 @@ async def health() -> dict[str, str]:
 async def reset(req: ResetRequest | None = None) -> dict[str, Any]:
     if req is None:
         req = ResetRequest()
-    result = await _env.reset(seed=req.seed, difficulty=req.difficulty)
+    try:
+        result = await _env.reset(seed=req.seed, difficulty=req.difficulty)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _result_to_dict(result)
 
 
