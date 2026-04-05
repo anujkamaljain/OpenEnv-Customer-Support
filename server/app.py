@@ -69,16 +69,23 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OpenEnv — debug</title>
+  <title>Customer Support Command Center</title>
   <style>
     :root {
-      --bg: #1a1b1e;
+      --bg: #141517;
       --surface: #25262b;
       --border: #373a40;
-      --text: #c1c2c5;
+      --text: #e9ecef;
       --muted: #868e96;
       --accent: #4c6ef5;
-      --accent-hover: #5c7cfa;
+      --exec: #e8590c;
+      --exec-hover: #fd7e14;
+      --hint-bg: #1b4332;
+      --hint-border: #2b8a3e;
+      --card-blue: #1864ab;
+      --card-orange: #d9480f;
+      --card-green: #2b8a3e;
+      --card-grey: #495057;
       --danger: #fa5252;
       --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
     }
@@ -91,92 +98,262 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       color: var(--text);
       line-height: 1.45;
     }
-    .wrap {
-      max-width: 52rem;
-      margin: 0 auto;
-      padding: 1.5rem 1rem 3rem;
+    .wrap { max-width: 56rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    .title-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+    .title-row span { font-size: 1.75rem; }
+    h1 { font-size: 1.35rem; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); font-size: 0.875rem; margin: 0 0 1.25rem; }
+    .hint-bar {
+      background: var(--hint-bg);
+      border: 1px solid var(--hint-border);
+      color: #b2f2bb;
+      font-size: 0.8rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
     }
-    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.25rem; }
-    .sub { color: var(--muted); font-size: 0.875rem; margin-bottom: 1.25rem; }
     .panel {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem 1.1rem;
+      border-radius: 10px;
+      padding: 1rem 1.15rem;
       margin-bottom: 1rem;
     }
-    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
-    .row:last-child { margin-bottom: 0; }
-    button {
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      padding: 0.45rem 0.9rem;
-      border-radius: 6px;
-      font-size: 0.875rem;
-      cursor: pointer;
+    .panel h2 {
+      margin: 0 0 0.75rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
     }
-    button:hover { background: var(--accent-hover); }
-    button.secondary { background: #495057; }
-    button.secondary:hover { background: #5c636a; }
-    label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 0.35rem; }
-    textarea {
+    label { font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 0.3rem; }
+    label .hint { font-weight: 400; color: #5c636a; }
+    select, input[type="text"], input[type="number"], textarea {
       width: 100%;
-      min-height: 8rem;
-      padding: 0.6rem 0.65rem;
+      padding: 0.5rem 0.55rem;
       border-radius: 6px;
       border: 1px solid var(--border);
-      background: #141517;
+      background: #1a1b1e;
       color: var(--text);
-      font-family: var(--mono);
-      font-size: 0.8rem;
-      resize: vertical;
+      font-size: 0.85rem;
     }
+    select {
+      cursor: pointer;
+      appearance: auto;
+      min-height: 2.25rem;
+    }
+    textarea { font-family: var(--mono); font-size: 0.8rem; min-height: 4.5rem; resize: vertical; }
+    .form-grid {
+      display: grid;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+    }
+    @media (min-width: 560px) {
+      .form-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+    }
+    .field-group { display: none; }
+    .field-group.active { display: block; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+    button {
+      border: none;
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    button.exec { background: var(--exec); color: #fff; }
+    button.exec:hover { background: var(--exec-hover); }
+    button.secondary { background: #495057; color: #fff; }
+    button.secondary:hover { background: #5c636a; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.65rem;
+    }
+    @media (min-width: 720px) { .metrics { grid-template-columns: repeat(4, 1fr); } }
+    .metric {
+      border-radius: 8px;
+      padding: 0.75rem 0.85rem;
+      color: #fff;
+    }
+    .metric .m-label { font-size: 0.65rem; text-transform: uppercase; opacity: 0.9; letter-spacing: 0.06em; }
+    .metric .m-val { font-size: 1.35rem; font-weight: 700; margin-top: 0.2rem; font-variant-numeric: tabular-nums; }
+    .metric.blue { background: linear-gradient(135deg, var(--card-blue), #1c7ed6); }
+    .metric.orange { background: linear-gradient(135deg, var(--card-orange), #e8590c); }
+    .metric.green { background: linear-gradient(135deg, var(--card-green), #37b24d); }
+    .metric.grey { background: linear-gradient(135deg, #495057, #6c757d); }
     pre {
       margin: 0;
       padding: 0.65rem 0.75rem;
-      background: #141517;
+      background: #1a1b1e;
       border: 1px solid var(--border);
       border-radius: 6px;
       font-family: var(--mono);
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       overflow-x: auto;
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .grid { display: grid; gap: 0.75rem; }
-    @media (min-width: 640px) { .grid-2 { grid-template-columns: 1fr 1fr; } }
-    .tag { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.25rem; }
-    #status { font-size: 0.8rem; min-height: 1.25rem; }
+    .tag { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.25rem; }
+    #status { font-size: 0.8rem; min-height: 1.25rem; margin: 0.5rem 0; }
     #status.err { color: var(--danger); }
-    footer { margin-top: 1.5rem; font-size: 0.75rem; color: var(--muted); }
+    .json-preview label { margin-top: 0.75rem; }
+    #actionJson { min-height: 5rem; opacity: 0.92; }
+    footer { margin-top: 1.25rem; font-size: 0.72rem; color: var(--muted); }
     footer a { color: var(--accent); }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>OpenEnv — customer support</h1>
-    <p class="sub">Debug UI · same API as Postman · <a href="/health" style="color:var(--accent)">/health</a> (JSON)</p>
+    <div class="title-row">
+      <span aria-hidden="true">🤖</span>
+      <h1>Customer Support Command Center</h1>
+    </div>
+    <p class="sub">Classify → route → respond / escalate / request info → resolve ·
+      <a href="/health" style="color:var(--accent)">/health</a></p>
+
+    <div class="metrics panel" style="padding:0.85rem;margin-bottom:1rem;background:#1a1b1e;border-style:dashed">
+      <div class="metric blue">
+        <div class="m-label">Last step reward</div>
+        <div class="m-val" id="mLastReward">—</div>
+      </div>
+      <div class="metric orange">
+        <div class="m-label">Total reward</div>
+        <div class="m-val" id="mTotalReward">—</div>
+      </div>
+      <div class="metric green">
+        <div class="m-label">Score</div>
+        <div class="m-val" id="mScore">—</div>
+      </div>
+      <div class="metric grey">
+        <div class="m-label">Status</div>
+        <div class="m-val" id="mStatus" style="font-size:1rem">—</div>
+      </div>
+    </div>
 
     <div class="panel">
-      <div class="row">
-        <button type="button" id="btnReset">Reset environment</button>
-        <button type="button" id="btnState" class="secondary">Get state</button>
-        <button type="button" id="btnStep">Step</button>
+      <div class="hint-bar">
+        Follow the env phase: start with <strong>classify</strong>, then <strong>route</strong>, then optional
+        <strong>respond</strong> / <strong>escalate</strong> / <strong>request_info</strong>, then <strong>resolve</strong>.
+        Use <strong>Get state</strong> to see <code>available_actions</code>.
       </div>
-      <label for="actionJson">Action JSON (sent as <code>POST /step</code> body <code>{"action": …}</code>)</label>
-      <textarea id="actionJson" spellcheck="false">{
-  "action_type": "classify",
-  "category": "general_inquiry",
-  "priority": "medium"
-}</textarea>
+      <h2>Step-by-step action</h2>
+      <label for="actionType">Action type <span class="hint">(matches POST /step JSON)</span></label>
+      <select id="actionType">
+        <option value="classify">classify</option>
+        <option value="route">route</option>
+        <option value="respond">respond</option>
+        <option value="escalate">escalate</option>
+        <option value="request_info">request_info</option>
+        <option value="resolve">resolve</option>
+      </select>
+
+      <div id="fgClassify" class="field-group form-grid cols-2">
+        <div>
+          <label for="clsCategory">Category</label>
+          <select id="clsCategory">
+            <option value="billing">billing</option>
+            <option value="bug_report">bug_report</option>
+            <option value="feature_request">feature_request</option>
+            <option value="account_access">account_access</option>
+            <option value="general_inquiry" selected>general_inquiry</option>
+            <option value="cancellation">cancellation</option>
+          </select>
+        </div>
+        <div>
+          <label for="clsPriority">Priority</label>
+          <select id="clsPriority">
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+            <option value="critical">critical</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="fgRoute" class="field-group form-grid">
+        <div>
+          <label for="rteDept">Department</label>
+          <select id="rteDept">
+            <option value="billing">billing</option>
+            <option value="technical">technical</option>
+            <option value="account">account</option>
+            <option value="general" selected>general</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="fgRespond" class="field-group form-grid">
+        <div>
+          <label for="rspTone">Tone</label>
+          <select id="rspTone">
+            <option value="formal" selected>formal</option>
+            <option value="empathetic">empathetic</option>
+            <option value="concise">concise</option>
+          </select>
+        </div>
+        <div style="grid-column:1/-1">
+          <label for="rspText">Response text</label>
+          <textarea id="rspText" spellcheck="false">Thank you for contacting us. We are reviewing your request.</textarea>
+        </div>
+      </div>
+
+      <div id="fgEscalate" class="field-group form-grid cols-2">
+        <div>
+          <label for="escTeam">Target team</label>
+          <select id="escTeam">
+            <option value="l2_support" selected>l2_support</option>
+            <option value="engineering">engineering</option>
+            <option value="management">management</option>
+          </select>
+        </div>
+        <div style="grid-column:1/-1">
+          <label for="escReason">Reason</label>
+          <textarea id="escReason" spellcheck="false">Requires specialist review per policy.</textarea>
+        </div>
+      </div>
+
+      <div id="fgRequestInfo" class="field-group form-grid">
+        <div>
+          <label for="reqQ">Question to customer</label>
+          <textarea id="reqQ" spellcheck="false">Could you share your account email and approximate time of the issue?</textarea>
+        </div>
+      </div>
+
+      <div id="fgResolve" class="field-group form-grid">
+        <div style="grid-column:1/-1">
+          <label for="rsvSummary">Resolution summary</label>
+          <textarea id="rsvSummary" spellcheck="false">Issue reviewed and resolved to customer satisfaction.</textarea>
+        </div>
+        <div>
+          <label for="rsvComp">Offered compensation <span class="hint">(optional, empty = omit)</span></label>
+          <input type="number" id="rsvComp" step="any" placeholder="e.g. 29.99" />
+        </div>
+      </div>
+
+      <div class="json-preview">
+        <label for="actionJson">Request body preview <code>{"action": …}</code></label>
+        <textarea id="actionJson" readonly spellcheck="false"></textarea>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" class="exec" id="btnStep">Execute step</button>
+        <button type="button" class="secondary" id="btnReset">Reset</button>
+        <button type="button" class="secondary" id="btnState">Get state</button>
+      </div>
     </div>
 
     <p id="status"></p>
 
-    <div class="panel grid grid-2">
+    <div class="panel">
+      <div class="tag">observation</div>
+      <pre id="outObs">—</pre>
+    </div>
+    <div class="panel grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
       <div>
-        <div class="tag">reward</div>
+        <div class="tag">reward (response)</div>
         <pre id="outReward">—</pre>
       </div>
       <div>
@@ -185,15 +362,11 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       </div>
     </div>
     <div class="panel">
-      <div class="tag">observation</div>
-      <pre id="outObs">—</pre>
-    </div>
-    <div class="panel">
       <div class="tag">info</div>
       <pre id="outInfo">—</pre>
     </div>
 
-    <footer>Uses relative <code>fetch</code> URLs — works on localhost and Hugging Face Spaces.</footer>
+    <footer>Built from dropdowns → <code>POST /step</code>. Toggle action type to edit fields.</footer>
   </div>
   <script>
 (function () {
@@ -203,16 +376,104 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
   const outReward = $("outReward");
   const outDone = $("outDone");
   const outInfo = $("outInfo");
+  const mLast = $("mLastReward");
+  const mTotal = $("mTotalReward");
+  const mScore = $("mScore");
+  const mStat = $("mStatus");
+
+  let totalReward = 0;
 
   function pretty(obj) {
     return JSON.stringify(obj, null, 2);
   }
 
-  function showPayload(data) {
+  function buildAction() {
+    const t = $("actionType").value;
+    switch (t) {
+      case "classify":
+        return {
+          action_type: "classify",
+          category: $("clsCategory").value,
+          priority: $("clsPriority").value,
+        };
+      case "route":
+        return { action_type: "route", department: $("rteDept").value };
+      case "respond":
+        return {
+          action_type: "respond",
+          response_text: $("rspText").value.trim() || " ",
+          tone: $("rspTone").value,
+        };
+      case "escalate":
+        return {
+          action_type: "escalate",
+          reason: $("escReason").value.trim() || "Escalation.",
+          target_team: $("escTeam").value,
+        };
+      case "request_info":
+        return {
+          action_type: "request_info",
+          question_to_customer: $("reqQ").value.trim() || "Please provide more details.",
+        };
+      case "resolve": {
+        const raw = $("rsvComp").value.trim();
+        let comp = null;
+        if (raw !== "") {
+          const n = Number(raw);
+          comp = Number.isFinite(n) ? n : null;
+        }
+        const o = {
+          action_type: "resolve",
+          resolution_summary: $("rsvSummary").value.trim() || "Resolved.",
+        };
+        if (comp !== null) o.offered_compensation = comp;
+        return o;
+      }
+      default:
+        return { action_type: "classify", category: "general_inquiry", priority: "medium" };
+    }
+  }
+
+  function syncJsonPreview() {
+    $("actionJson").value = pretty(buildAction());
+  }
+
+  function showFieldGroups() {
+    const t = $("actionType").value;
+    document.querySelectorAll(".field-group").forEach((el) => {
+      el.classList.toggle("active", el.id === "fg" + capitalize(t));
+    });
+    syncJsonPreview();
+  }
+
+  function capitalize(s) {
+    return s.split("_").map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
+  }
+
+  ["actionType", "clsCategory", "clsPriority", "rteDept", "rspTone", "rspText",
+   "escTeam", "escReason", "reqQ", "rsvSummary", "rsvComp"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("input", syncJsonPreview);
+    if (el) el.addEventListener("change", syncJsonPreview);
+  });
+  $("actionType").addEventListener("change", showFieldGroups);
+
+  function showPayload(data, opts) {
     outObs.textContent = data.observation == null ? "null" : pretty(data.observation);
     outReward.textContent = String(data.reward);
     outDone.textContent = String(data.done);
     outInfo.textContent = pretty(data.info != null ? data.info : {});
+
+    mLast.textContent = Number(data.reward).toFixed(2);
+    if (opts && opts.addStepReward && typeof data.reward === "number") {
+      totalReward += data.reward;
+    }
+    mTotal.textContent = totalReward.toFixed(2);
+    const ns = data.info && typeof data.info.normalized_score === "number"
+      ? data.info.normalized_score
+      : null;
+    mScore.textContent = ns == null ? "—" : Math.round(ns * 100) + "%";
+    mStat.textContent = data.done ? "DONE" : "RUNNING";
   }
 
   function setStatus(msg, isErr) {
@@ -241,7 +502,10 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       setStatus((data && data.detail) || raw || res.statusText, true);
       return;
     }
-    showPayload(data);
+    totalReward = 0;
+    showPayload(data, {});
+    mLast.textContent = "0.00";
+    mTotal.textContent = "0.00";
     setStatus("POST /reset → " + res.status);
   }
 
@@ -253,18 +517,13 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       setStatus((data && data.detail) || raw || res.statusText, true);
       return;
     }
-    showPayload(data);
+    showPayload(data, {});
     setStatus("GET /state → " + res.status);
   }
 
   async function doStep() {
-    let action;
-    try {
-      action = JSON.parse($("actionJson").value);
-    } catch (e) {
-      setStatus("Invalid JSON in action textarea: " + e.message, true);
-      return;
-    }
+    const action = buildAction();
+    syncJsonPreview();
     setStatus("POST /step …");
     const res = await fetch("/step", {
       method: "POST",
@@ -277,13 +536,15 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       setStatus(String(detail || raw || res.statusText), true);
       return;
     }
-    showPayload(data);
+    showPayload(data, { addStepReward: true });
     setStatus("POST /step → " + res.status);
   }
 
   $("btnReset").addEventListener("click", () => { doReset().catch((e) => setStatus(String(e), true)); });
   $("btnState").addEventListener("click", () => { doState().catch((e) => setStatus(String(e), true)); });
   $("btnStep").addEventListener("click", () => { doStep().catch((e) => setStatus(String(e), true)); });
+
+  showFieldGroups();
 })();
   </script>
 </body>
