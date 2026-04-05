@@ -90,6 +90,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
     }
     * { box-sizing: border-box; }
+    html { color-scheme: dark; }
     body {
       margin: 0;
       min-height: 100vh;
@@ -99,9 +100,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       line-height: 1.45;
     }
     .wrap { max-width: 56rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
-    .title-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
-    .title-row span { font-size: 1.75rem; }
-    h1 { font-size: 1.35rem; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+    h1 { font-size: 1.35rem; font-weight: 700; margin: 0 0 0.25rem; letter-spacing: -0.02em; }
     .sub { color: var(--muted); font-size: 0.875rem; margin: 0 0 1.25rem; }
     .hint-bar {
       background: var(--hint-bg);
@@ -142,6 +141,46 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       min-height: 2.25rem;
     }
     textarea { font-family: var(--mono); font-size: 0.8rem; min-height: 4.5rem; resize: vertical; }
+    /* Dark scrollbars — match theme (textarea JSON preview, pre blocks, timeline) */
+    textarea,
+    pre {
+      scrollbar-width: thin;
+      scrollbar-color: #5c636a #141517;
+    }
+    textarea::-webkit-scrollbar,
+    pre::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    textarea::-webkit-scrollbar-corner,
+    pre::-webkit-scrollbar-corner {
+      background: #141517;
+    }
+    textarea::-webkit-scrollbar-track,
+    pre::-webkit-scrollbar-track {
+      background: #141517;
+      border-radius: 4px;
+    }
+    textarea::-webkit-scrollbar-thumb,
+    pre::-webkit-scrollbar-thumb {
+      background: #5c636a;
+      border-radius: 4px;
+      border: 2px solid #141517;
+    }
+    textarea::-webkit-scrollbar-thumb:hover,
+    pre::-webkit-scrollbar-thumb:hover {
+      background: #868e96;
+    }
+    /* Number inputs: drop default light steppers (seed still editable) */
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
     .form-grid {
       display: grid;
       gap: 0.75rem;
@@ -277,11 +316,15 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       overflow-x: hidden;
       scrollbar-gutter: stable;
       scrollbar-width: thin;
-      scrollbar-color: #5c636a #1a1b1e;
+      scrollbar-color: #5c636a #141517;
     }
     .timeline-scroll::-webkit-scrollbar { width: 8px; }
-    .timeline-scroll::-webkit-scrollbar-track { background: #1a1b1e; border-radius: 4px; }
-    .timeline-scroll::-webkit-scrollbar-thumb { background: #5c636a; border-radius: 4px; }
+    .timeline-scroll::-webkit-scrollbar-track { background: #141517; border-radius: 4px; }
+    .timeline-scroll::-webkit-scrollbar-thumb {
+      background: #5c636a;
+      border-radius: 4px;
+      border: 2px solid #141517;
+    }
     .timeline-scroll::-webkit-scrollbar-thumb:hover { background: #868e96; }
     .timeline-list { display: flex; flex-direction: column; gap: 0.5rem; }
     .timeline-item {
@@ -338,10 +381,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <div class="wrap">
-    <div class="title-row">
-      <span aria-hidden="true">🤖</span>
-      <h1>Customer Support Command Center</h1>
-    </div>
+    <h1>Customer Support Command Center</h1>
     <p class="sub">Classify → route → respond / escalate / request info → resolve ·
       <a href="/health" style="color:var(--accent)">/health</a></p>
 
