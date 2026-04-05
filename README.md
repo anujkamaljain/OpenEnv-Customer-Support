@@ -276,6 +276,17 @@ docker run -p 7860:7860 -e HF_TOKEN=your_token openenv-customer-support
 
 The server exposes endpoints on port `7860`.
 
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/` | Browser **Command Center** (HTML debug UI) |
+| `GET` | `/docs` | Interactive **OpenAPI** reference (Swagger UI; same contract as this section) |
+| `GET` | `/health` | Liveness probe — JSON `{"status": "ok"}` |
+| `POST` | `/reset` | Start a new episode |
+| `POST` | `/step` | Apply one action |
+| `GET` | `/state` | Read observation without advancing |
+| `POST` | `/close` | Clear episode state |
+| `POST` | `/inference` | Run the bundled LLM loop once (requires `HF_TOKEN` on the server) |
+
 #### POST /reset
 
 Starts a new episode. Body is **optional** — all fields have defaults.
@@ -299,8 +310,10 @@ curl -X POST http://localhost:7860/reset
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `seed` | `int` | `0` | Deterministic ticket selection seed |
-| `difficulty` | `string \| null` | `null` | `"easy"`, `"medium"`, `"hard"`, or `null` for all |
+| `seed` | `int` | `0` | Index into the ticket pool (modulo pool size); with `difficulty` omitted, indexes the full combined bank |
+| `difficulty` | `easy` \| `medium` \| `hard` \| omitted / `null` | `null` | Only these three literals are accepted; omit or `null` to sample across all difficulties. Other strings are rejected with **422** (Swagger’s generic `"string"` example is invalid). |
+
+**Errors:** **400** if the ticket bank cannot satisfy the request (e.g. empty pool for a filter). **422** if JSON does not match the schema.
 
 **Sample response:**
 
@@ -336,7 +349,12 @@ curl -X POST http://localhost:7860/reset
 
 #### POST /step
 
-Applies an action. The body must contain an `action` object with `action_type` and its required fields.
+Applies an action. The body must be `{"action": { ... }}` where `action` matches one of the Pydantic action models (discriminated union on `action_type` — same shapes as in [Action Space](#action-space)).
+
+**Validation vs. phase errors (HTTP):**
+
+- **422** — JSON does not match any action schema (unknown `action_type`, missing required fields, wrong enum values).
+- **200** — Request is valid JSON, but the environment may apply a **penalty** (`reward` negative) if the action is illegal for the current phase (same behavior as the Python `CustomerSupportEnv`).
 
 **All 6 action types:**
 
@@ -442,7 +460,7 @@ curl -X POST http://localhost:7860/step \
 
 #### GET /state
 
-Returns the current observation without advancing the episode.
+Returns the current observation without advancing the episode. If **`POST /reset`** has never been called (or after **`POST /close`**), the response is still **200** with `observation: null`, `reward: 0.0`, `done: false`, and `info: {}`.
 
 ```bash
 curl http://localhost:7860/state
@@ -450,10 +468,24 @@ curl http://localhost:7860/state
 
 #### POST /close
 
-Releases the episode. Call before starting a new one.
+Clears internal episode state on the server. Call **`POST /reset`** before **`POST /step`** again.
 
 ```bash
 curl -X POST http://localhost:7860/close
+```
+
+#### GET /health
+
+```bash
+curl http://localhost:7860/health
+```
+
+#### POST /inference
+
+Runs `inference.run()` in-process (same script as `python inference.py`). Requires **`HF_TOKEN`** and related settings on the server. Response JSON: `stdout` (captured logs), `score`, `success` (parsed from the final `[END]` line when present).
+
+```bash
+curl -X POST http://localhost:7860/inference
 ```
 
 ### Python API
@@ -530,8 +562,12 @@ This is only needed if you use the `/inference` endpoint. The environment endpoi
 Once the Space is running (build takes ~30 seconds), test it:
 
 ```bash
-# Health check
-curl https://anuj2209-openenv-customer-support.hf.space/
+# Health check (JSON)
+curl https://anuj2209-openenv-customer-support.hf.space/health
+
+# Optional: open Command Center (HTML) or API docs in a browser
+# https://anuj2209-openenv-customer-support.hf.space/
+# https://anuj2209-openenv-customer-support.hf.space/docs
 
 # Reset
 curl -X POST https://anuj2209-openenv-customer-support.hf.space/reset \
@@ -582,7 +618,7 @@ Scores are `normalized_score` values (cumulative reward / max achievable reward)
 │       └── hard.json         # 10 tickets
 ├── server/
 │   └── app.py               # FastAPI server
-├── tests/                    # 215 tests (pytest + pytest-asyncio)
+├── tests/                    # 216 tests (pytest + pytest-asyncio)
 ├── inference.py              # LLM agent loop (validator-compliant)
 ├── openenv.yaml              # Environment manifest
 ├── Dockerfile
@@ -600,7 +636,7 @@ python -m pytest tests/ -q
 ```
 
 ```
-215 passed in ~1s
+216 passed in ~1s
 ```
 
 Tests cover: state transitions, reward bounds, grader determinism, keyword scoring robustness, SLA penalties, trajectory simulations (best/worst case), trade-off mechanics, and inference output format compliance.
