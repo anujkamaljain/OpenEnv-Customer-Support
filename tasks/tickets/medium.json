@@ -1,0 +1,133 @@
+[
+  {
+    "ticket_id": "MED-001",
+    "ticket_text": "Your app keeps crashing whenever I try to upload files larger than 10MB. I've tried reinstalling but the issue persists. This is blocking my work — I need to upload project files daily. I'm on version 4.2.1 on macOS.",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "pro",
+    "gold_category": "bug_report",
+    "gold_priority": "high",
+    "gold_department": "technical",
+    "response_spec": {
+      "required": ["investigat", "crash", "upload"],
+      "optional": ["workaround", "fix", "version", "team"],
+      "forbidden": ["not a bug", "user error"],
+      "min_required_hits": 2
+    },
+    "resolution_spec": {
+      "required": ["fix", "upload"],
+      "optional": ["identified", "update", "deploy"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "constraints": ["use empathetic tone"],
+    "difficulty": "medium",
+    "category_hint": "bug_report",
+    "customer_value": "medium"
+  },
+  {
+    "ticket_id": "MED-002",
+    "ticket_text": "I upgraded from Free to Pro last week but I'm still being charged the old rate AND a new charge appeared. My account shows I've paid $49.99 plus an extra $14.99 that doesn't make sense. I want a clear explanation and a correction.",
+    "customer_sentiment": "angry",
+    "customer_tier": "pro",
+    "gold_category": "billing",
+    "gold_priority": "high",
+    "gold_department": "billing",
+    "response_spec": {
+      "required": ["apolog", "charge", "review"],
+      "optional": ["correct", "upgrade", "billing"],
+      "forbidden": ["your fault", "no error"],
+      "min_required_hits": 2
+    },
+    "resolution_spec": {
+      "required": ["refund", "corrected"],
+      "optional": ["adjusted", "billing", "apolog"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "compensation_range": [14.99, 14.99],
+    "constraints": ["use empathetic tone"],
+    "difficulty": "medium",
+    "category_hint": "billing",
+    "customer_value": "medium"
+  },
+  {
+    "ticket_id": "MED-003",
+    "ticket_text": "We need an API integration with Slack so our team can receive notifications directly in our channels. We're evaluating whether to continue using your platform and this feature would be a deciding factor.",
+    "customer_sentiment": "neutral",
+    "customer_tier": "pro",
+    "gold_category": "feature_request",
+    "gold_priority": "medium",
+    "gold_department": "technical",
+    "response_spec": {
+      "required": ["integration", "slack"],
+      "optional": ["roadmap", "feedback", "team", "timeline"],
+      "forbidden": ["not possible", "will not"],
+      "min_required_hits": 2
+    },
+    "resolution_spec": {
+      "required": ["feature", "request", "logged"],
+      "optional": ["slack", "integration", "roadmap"],
+      "forbidden": [],
+      "min_required_hits": 2
+    },
+    "requires_escalation": false,
+    "constraints": [],
+    "difficulty": "medium",
+    "category_hint": "feature_request",
+    "customer_value": "medium"
+  },
+  {
+    "ticket_id": "MED-004",
+    "ticket_text": "My account got locked after I entered the wrong password too many times. I need to access it urgently because I have a client presentation in 2 hours. Please help me get back in as soon as possible.",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "pro",
+    "gold_category": "account_access",
+    "gold_priority": "high",
+    "gold_department": "account",
+    "response_spec": {
+      "required": ["unlock", "account", "verify"],
+      "optional": ["identity", "security", "urgent"],
+      "forbidden": ["wait 24 hours", "cannot help"],
+      "min_required_hits": 2
+    },
+    "resolution_spec": {
+      "required": ["unlocked", "access"],
+      "optional": ["restored", "verified", "identity"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "constraints": ["verify identity before unlocking"],
+    "difficulty": "medium",
+    "category_hint": "account_access",
+    "customer_value": "medium"
+  },
+  {
+    "ticket_id": "MED-005",
+    "ticket_text": "I'm thinking about cancelling my Pro subscription. The price went up recently and I'm not sure I'm getting enough value. Are there any options you can offer to make it worth staying? Otherwise please process my cancellation.",
+    "customer_sentiment": "neutral",
+    "customer_tier": "pro",
+    "gold_category": "cancellation",
+    "gold_priority": "medium",
+    "gold_department": "account",
+    "response_spec": {
+      "required": ["value", "offer"],
+      "optional": ["discount", "retention", "plan", "stay"],
+      "forbidden": ["processed your cancellation"],
+      "min_required_hits": 2
+    },
+    "resolution_spec": {
+      "required": ["offer", "discount"],
+      "optional": ["retention", "subscription", "value"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "constraints": ["offer discount before processing cancellation"],
+    "difficulty": "medium",
+    "category_hint": "general_inquiry",
+    "customer_value": "medium"
+  }
+]

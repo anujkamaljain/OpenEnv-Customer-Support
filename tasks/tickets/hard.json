@@ -1,0 +1,282 @@
+[
+  {
+    "ticket_id": "HARD-001",
+    "ticket_text": "URGENT: Our entire team of 45 people lost access to their project data after your latest update. We're an enterprise customer paying $15,000/year and this is completely unacceptable. Our data appears to be missing from the dashboard and we have critical deliverables due this week. We need immediate resolution.",
+    "customer_sentiment": "angry",
+    "customer_tier": "enterprise",
+    "gold_category": "bug_report",
+    "gold_priority": "critical",
+    "gold_department": "technical",
+    "response_spec": {
+      "required": ["apolog", "investigat", "priority", "data"],
+      "optional": ["team", "update", "immediately", "restore"],
+      "forbidden": ["not a priority", "scheduled maintenance"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["data", "restored", "root cause", "prevention"],
+      "optional": ["update", "deploy", "monitor"],
+      "forbidden": ["data loss is permanent"],
+      "min_required_hits": 3
+    },
+    "requires_escalation": true,
+    "escalation_reason": "Enterprise customer experiencing data loss requires engineering escalation",
+    "escalation_target": "engineering",
+    "constraints": ["must escalate enterprise bugs to engineering", "use empathetic tone"],
+    "difficulty": "hard",
+    "category_hint": null,
+    "customer_value": "high"
+  },
+  {
+    "ticket_id": "HARD-002",
+    "ticket_text": "I've been a customer for 3 years and this is the third time I've been overcharged. Last month I was billed $79.99 instead of $49.99 AND my account settings were changed without my consent — my notification preferences were reset and my timezone is wrong. I'm seriously considering switching to a competitor. I want a refund and an explanation.",
+    "customer_sentiment": "angry",
+    "customer_tier": "pro",
+    "gold_category": "billing",
+    "gold_priority": "high",
+    "gold_department": "billing",
+    "response_spec": {
+      "required": ["apolog", "overcharg", "refund", "settings"],
+      "optional": ["review", "account", "loyalty"],
+      "forbidden": ["your fault", "no error found"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["refund", "settings", "restored", "corrected"],
+      "optional": ["billing", "apolog", "prevent"],
+      "forbidden": ["no refund"],
+      "min_required_hits": 3
+    },
+    "requires_escalation": false,
+    "compensation_range": [20.0, 50.0],
+    "constraints": ["do not offer refund > $50", "use empathetic tone"],
+    "difficulty": "hard",
+    "category_hint": null,
+    "customer_value": "medium"
+  },
+  {
+    "ticket_id": "HARD-003",
+    "ticket_text": "We've detected suspicious login attempts on our enterprise account from IP addresses in countries where we have no employees. Two admin accounts show login activity at 3 AM local time. We need an immediate security audit and all sessions terminated. This could be a data breach.",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "enterprise",
+    "gold_category": "account_access",
+    "gold_priority": "critical",
+    "gold_department": "account",
+    "response_spec": {
+      "required": ["security", "audit", "sessions", "terminat"],
+      "optional": ["investigat", "breach", "immediate"],
+      "forbidden": ["don't worry", "routine", "false alarm"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["security", "audit", "sessions", "terminat", "credentials"],
+      "optional": ["reset", "monitor", "review"],
+      "forbidden": ["no breach detected"],
+      "min_required_hits": 3
+    },
+    "requires_escalation": true,
+    "escalation_reason": "Potential security breach requires management escalation",
+    "escalation_target": "management",
+    "constraints": ["must escalate security issues to management", "use formal tone"],
+    "difficulty": "hard",
+    "category_hint": null,
+    "customer_value": "high"
+  },
+  {
+    "ticket_id": "HARD-004",
+    "ticket_text": "I've been a loyal customer for 5 years on the Pro plan. Due to budget cuts my company is forcing me to cancel. However I have 3 months left on my annual plan that I prepaid. I need a prorated refund for the remaining months and I want to export all my data before the account is closed. Can you also tell me if there's a cheaper plan that might work?",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "pro",
+    "gold_category": "cancellation",
+    "gold_priority": "medium",
+    "gold_department": "account",
+    "response_spec": {
+      "required": ["refund", "prorated", "export", "data"],
+      "optional": ["alternative", "plan", "loyal"],
+      "forbidden": ["no refund", "non-refundable"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["refund", "prorated", "export", "data"],
+      "optional": ["processed", "cancel", "alternative"],
+      "forbidden": ["no refund available"],
+      "min_required_hits": 3
+    },
+    "requires_escalation": false,
+    "compensation_range": [30.0, 100.0],
+    "constraints": ["do not offer refund > $100", "offer alternative plan before cancellation"],
+    "difficulty": "hard",
+    "category_hint": null,
+    "customer_value": "medium"
+  },
+  {
+    "ticket_id": "HARD-005",
+    "ticket_text": "The search feature has been returning wrong results for the past week — it shows completely unrelated documents. Also, we really need a bulk export feature that lets us download all files at once instead of one by one. The search bug is blocking our team's productivity. We're evaluating renewal of our enterprise contract next month.",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "enterprise",
+    "gold_category": "bug_report",
+    "gold_priority": "high",
+    "gold_department": "technical",
+    "response_spec": {
+      "required": ["search", "bug", "investigat"],
+      "optional": ["fix", "export", "feature", "request", "priority"],
+      "forbidden": ["working as intended", "not a bug"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["search", "fix", "identified"],
+      "optional": ["export", "feature", "logged", "deploy"],
+      "forbidden": [],
+      "min_required_hits": 2
+    },
+    "requires_escalation": true,
+    "escalation_reason": "Enterprise customer with production bug requires L2 support investigation",
+    "escalation_target": "l2_support",
+    "constraints": ["address bug before discussing feature request", "use empathetic tone"],
+    "difficulty": "hard",
+    "category_hint": null,
+    "customer_value": "high"
+  },
+
+  {
+    "ticket_id": "HARD-006",
+    "ticket_text": "Since last Tuesday my invoices show incorrect amounts. The subtotals don't match what I ordered and the tax calculation seems off. When I click 'Recalculate' the button doesn't respond at all — the page just freezes. Not sure if this is a billing error on your end or if the system is broken. Either way I need it fixed because I can't send these invoices to my clients.",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "pro",
+    "gold_category": "bug_report",
+    "gold_priority": "high",
+    "gold_department": "technical",
+    "response_spec": {
+      "required": ["investigat", "invoice", "recalculat", "bug"],
+      "optional": ["fix", "workaround", "team", "billing"],
+      "forbidden": ["adjust your plan", "change subscription", "billing error on your end"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["fix", "invoice", "calculat"],
+      "optional": ["deployed", "update", "verified", "rendering"],
+      "forbidden": ["billing adjustment"],
+      "min_required_hits": 2
+    },
+    "requires_escalation": false,
+    "constraints": ["use empathetic tone"],
+    "difficulty": "hard",
+    "category_hint": "billing",
+    "customer_value": "medium",
+    "secondary_category": "billing",
+    "distractors": ["invoice", "amounts", "billing", "tax", "subtotals"]
+  },
+  {
+    "ticket_id": "HARD-007",
+    "ticket_text": "Hello, I noticed some unusual activity on our account. A few new admin users were added that I don't recognize, and some API keys were regenerated overnight. I wanted to bring this to your attention when convenient. Our enterprise account manages sensitive client data across three regions. Thank you for looking into this.",
+    "customer_sentiment": "neutral",
+    "customer_tier": "enterprise",
+    "gold_category": "account_access",
+    "gold_priority": "critical",
+    "gold_department": "account",
+    "response_spec": {
+      "required": ["security", "investigat", "admin", "API key"],
+      "optional": ["immediately", "audit", "sessions", "terminat", "urgent"],
+      "forbidden": ["don't worry", "routine", "minor", "when we get a chance"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["unauthorized", "removed", "API key", "reset", "audit"],
+      "optional": ["security review", "monitor", "credential"],
+      "forbidden": ["no issue found", "routine check"],
+      "min_required_hits": 3
+    },
+    "requires_escalation": true,
+    "escalation_reason": "Potential unauthorized access to enterprise account with sensitive data",
+    "escalation_target": "management",
+    "constraints": ["must escalate security issues to management", "use formal tone", "treat as critical despite calm tone"],
+    "difficulty": "hard",
+    "customer_value": "high",
+    "distractors": ["when convenient", "thank you"]
+  },
+  {
+    "ticket_id": "HARD-008",
+    "ticket_text": "Something isn't working right with our system. We keep getting errors but I'm not exactly sure where they're coming from. It might be the dashboard or maybe the reports section — several team members have complained but nobody can pinpoint the exact issue. Can you look into it?",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "enterprise",
+    "gold_category": "bug_report",
+    "gold_priority": "high",
+    "gold_department": "technical",
+    "response_spec": {
+      "required": ["investigat", "error", "dashboard", "report"],
+      "optional": ["reproduce", "details", "team", "fix"],
+      "forbidden": ["resolved", "fixed", "no issue"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["dashboard", "rendering", "fix", "deploy"],
+      "optional": ["root cause", "cache", "update", "monitor"],
+      "forbidden": [],
+      "min_required_hits": 2
+    },
+    "requires_escalation": true,
+    "escalation_reason": "Enterprise production bug affecting multiple users requires L2 investigation",
+    "escalation_target": "l2_support",
+    "constraints": ["request clarification before responding", "use empathetic tone"],
+    "difficulty": "hard",
+    "customer_value": "high",
+    "partial_info": true,
+    "info_reveals": "The errors appear specifically in the dashboard when loading monthly reports. The page shows a blank white screen with 'Error 500' in the browser console. It started after the March 28th platform update. Approximately 12 team members across two offices are affected. The daily reports work fine — only monthly aggregations fail."
+  },
+  {
+    "ticket_id": "HARD-009",
+    "ticket_text": "I'm absolutely FURIOUS. I've been paying $499/year for your Enterprise plan and the advanced analytics feature has been broken for TWO MONTHS. I've raised 5 previous tickets and NOBODY has fixed it. I demand a FULL refund for the entire year — all $499. If I don't get it, I'll be posting about this on every review site and cancelling immediately. My company relies on these analytics and you've caused us significant business losses.",
+    "customer_sentiment": "angry",
+    "customer_tier": "enterprise",
+    "gold_category": "billing",
+    "gold_priority": "high",
+    "gold_department": "billing",
+    "response_spec": {
+      "required": ["apolog", "analytics", "understand", "frustrat"],
+      "optional": ["escalat", "priority", "compensat", "team", "review"],
+      "forbidden": ["full refund", "exception to policy", "entire year refund", "$499 refund"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["compensat", "analytics", "fix"],
+      "optional": ["partial", "credited", "timeline", "apolog", "refund"],
+      "forbidden": ["full refund of $499", "policy exception", "entire amount refunded"],
+      "min_required_hits": 2
+    },
+    "requires_escalation": false,
+    "compensation_range": [50.0, 150.0],
+    "constraints": ["do not offer refund > $150", "do not promise full refund", "use empathetic tone", "acknowledge the analytics issue specifically"],
+    "difficulty": "hard",
+    "customer_value": "high",
+    "distractors": ["full refund", "entire year", "$499", "every review site", "cancelling"]
+  },
+  {
+    "ticket_id": "HARD-010",
+    "ticket_text": "Hi team, a few things:\n\n1. The export button in reports has been showing a spinner for 30+ seconds lately (minor annoyance but still)\n\n2. I noticed my last invoice was $10 more than usual — not sure why, could be a mistake\n\n3. Most importantly — I just received an email notification saying someone changed the password on our main admin account, and it wasn't anyone on our team. I'm quite worried we may have been compromised.\n\nPlease advise on all three items when you can.",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "enterprise",
+    "gold_category": "account_access",
+    "gold_priority": "critical",
+    "gold_department": "account",
+    "response_spec": {
+      "required": ["security", "password", "admin", "compromis"],
+      "optional": ["export", "invoice", "investigat", "immediate", "priority"],
+      "forbidden": ["minor issue", "low priority", "not urgent", "when we get a chance"],
+      "min_required_hits": 3
+    },
+    "resolution_spec": {
+      "required": ["security", "password", "reset", "admin", "audit"],
+      "optional": ["export", "invoice", "billing", "review", "monitor"],
+      "forbidden": [],
+      "min_required_hits": 3
+    },
+    "requires_escalation": true,
+    "escalation_reason": "Potential account compromise requires management escalation",
+    "escalation_target": "management",
+    "constraints": ["must escalate security issues to management", "prioritize security over other issues", "use formal tone"],
+    "difficulty": "hard",
+    "customer_value": "high",
+    "secondary_category": "billing",
+    "distractors": ["export", "spinner", "invoice", "$10", "minor annoyance"]
+  }
+]

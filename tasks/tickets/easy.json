@@ -1,0 +1,133 @@
+[
+  {
+    "ticket_id": "EASY-001",
+    "ticket_text": "Hi, I forgot my password and can't log in to my account. I've tried the reset link but it says my email isn't recognized. Can you help me regain access?",
+    "customer_sentiment": "neutral",
+    "customer_tier": "free",
+    "gold_category": "account_access",
+    "gold_priority": "medium",
+    "gold_department": "account",
+    "response_spec": {
+      "required": ["password", "reset"],
+      "optional": ["email", "verify", "access"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "resolution_spec": {
+      "required": ["access", "restored"],
+      "optional": ["password", "reset", "email"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "constraints": [],
+    "difficulty": "easy",
+    "category_hint": "account_access",
+    "customer_value": "low"
+  },
+  {
+    "ticket_id": "EASY-002",
+    "ticket_text": "I was charged twice for my monthly subscription this month. My credit card shows two identical charges of $29.99 on March 1st. Please refund the duplicate charge.",
+    "customer_sentiment": "frustrated",
+    "customer_tier": "pro",
+    "gold_category": "billing",
+    "gold_priority": "high",
+    "gold_department": "billing",
+    "response_spec": {
+      "required": ["refund", "duplicate"],
+      "optional": ["charge", "process", "apolog"],
+      "forbidden": [],
+      "min_required_hits": 2
+    },
+    "resolution_spec": {
+      "required": ["refund", "processed"],
+      "optional": ["duplicate", "corrected", "credit"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "compensation_range": [29.99, 29.99],
+    "constraints": [],
+    "difficulty": "easy",
+    "category_hint": "billing",
+    "customer_value": "medium"
+  },
+  {
+    "ticket_id": "EASY-003",
+    "ticket_text": "Can you tell me what the differences are between the Free and Pro plans? I'm considering upgrading but want to understand what features I'd get.",
+    "customer_sentiment": "neutral",
+    "customer_tier": "free",
+    "gold_category": "general_inquiry",
+    "gold_priority": "low",
+    "gold_department": "general",
+    "response_spec": {
+      "required": ["plan", "features"],
+      "optional": ["upgrade", "pro", "comparison"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "resolution_spec": {
+      "required": ["plan", "features"],
+      "optional": ["comparison", "upgrade"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "constraints": [],
+    "difficulty": "easy",
+    "category_hint": "general_inquiry",
+    "customer_value": "low"
+  },
+  {
+    "ticket_id": "EASY-004",
+    "ticket_text": "It would be great if the app had a dark mode option. The bright white background is hard on my eyes when I use it at night. Please consider adding this feature.",
+    "customer_sentiment": "neutral",
+    "customer_tier": "pro",
+    "gold_category": "feature_request",
+    "gold_priority": "low",
+    "gold_department": "general",
+    "response_spec": {
+      "required": ["feature", "dark mode"],
+      "optional": ["request", "team", "roadmap"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "resolution_spec": {
+      "required": ["feature", "noted"],
+      "optional": ["roadmap", "team", "dark mode"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "constraints": [],
+    "difficulty": "easy",
+    "category_hint": "feature_request",
+    "customer_value": "low"
+  },
+  {
+    "ticket_id": "EASY-005",
+    "ticket_text": "I'd like to cancel my subscription effective immediately. I no longer need the service. Please confirm the cancellation and let me know if there's anything else I need to do.",
+    "customer_sentiment": "neutral",
+    "customer_tier": "pro",
+    "gold_category": "cancellation",
+    "gold_priority": "medium",
+    "gold_department": "account",
+    "response_spec": {
+      "required": ["cancel", "confirm"],
+      "optional": ["subscription", "effective", "process"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "resolution_spec": {
+      "required": ["cancelled", "confirmed"],
+      "optional": ["subscription", "effective"],
+      "forbidden": [],
+      "min_required_hits": 1
+    },
+    "requires_escalation": false,
+    "constraints": [],
+    "difficulty": "easy",
+    "category_hint": "cancellation",
+    "customer_value": "medium"
+  }
+]
