@@ -203,6 +203,125 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
     #actionJson { min-height: 5rem; opacity: 0.92; }
     footer { margin-top: 1.25rem; font-size: 0.72rem; color: var(--muted); }
     footer a { color: var(--accent); }
+
+    /* Current ticket (reference-style card) */
+    h2.section-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #f8f9fa;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.01em;
+    }
+    .ticket-panel {
+      background: #1e1f23 !important;
+      border-color: #2c2e33 !important;
+      padding: 1rem 1.1rem 1.1rem !important;
+    }
+    .ticket-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-bottom: 0.85rem;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.28rem 0.65rem;
+      border-radius: 5px;
+      background: #2f3138;
+      border: 1px solid #3d4049;
+      font-size: 0.72rem;
+      color: #dee2e6;
+    }
+    .pill kbd {
+      font-family: inherit;
+      font-weight: 600;
+      color: #adb5bd;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .pill span.val { font-weight: 600; color: #fff; }
+    .ticket-msg-wrap {
+      background: #121214;
+      border: 1px solid #2c2e33;
+      border-radius: 6px;
+      padding: 0.75rem 0.9rem 1rem;
+    }
+    .ticket-msg-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #868e96;
+      margin-bottom: 0.5rem;
+    }
+    .ticket-msg-body {
+      font-size: 0.95rem;
+      line-height: 1.55;
+      color: #f1f3f5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .ticket-msg-body.empty { color: #5c636a; font-style: italic; }
+
+    /* Action timeline */
+    .timeline-panel {
+      background: #252830 !important;
+      border-color: #3d4150 !important;
+    }
+    .timeline-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .timeline-item {
+      background: #121214;
+      border: 1px solid #2c2e33;
+      border-radius: 6px;
+      padding: 0.65rem 0.85rem;
+      overflow: hidden;
+    }
+    .timeline-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .tl-main { min-width: 0; flex: 1; }
+    .tl-step-num {
+      font-weight: 700;
+      color: #e9ecef;
+      font-size: 0.82rem;
+    }
+    .tl-action-name {
+      font-size: 0.82rem;
+      color: #ced4da;
+      font-weight: 500;
+    }
+    .tl-reward {
+      font-size: 0.85rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .tl-reward.neg { color: #ff8787; }
+    .tl-reward.pos { color: #8ce99a; }
+    .tl-feedback {
+      margin-top: 0.45rem;
+      padding-top: 0.45rem;
+      border-top: 1px solid #2c2e33;
+      font-size: 0.72rem;
+      line-height: 1.4;
+      color: #868e96;
+    }
+    .timeline-empty {
+      text-align: center;
+      padding: 1.25rem 0.75rem;
+      color: #868e96;
+      font-size: 0.82rem;
+      background: #121214;
+      border-radius: 6px;
+      border: 1px dashed #3d4049;
+    }
   </style>
 </head>
 <body>
@@ -230,6 +349,22 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
       <div class="metric grey">
         <div class="m-label">Status</div>
         <div class="m-val" id="mStatus" style="font-size:1rem">—</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Current Ticket</h2>
+    <div class="panel ticket-panel">
+      <div class="ticket-pills" id="ticketPills"></div>
+      <div class="ticket-msg-wrap">
+        <div class="ticket-msg-label">Customer Message</div>
+        <div class="ticket-msg-body empty" id="ticketBody">Reset or load state to show the active ticket.</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Action Timeline</h2>
+    <div class="panel timeline-panel">
+      <div class="timeline-list" id="timelineList">
+        <div class="timeline-empty">No actions yet. Run <strong>Reset</strong>, then <strong>Execute step</strong>.</div>
       </div>
     </div>
 
@@ -458,11 +593,112 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
   });
   $("actionType").addEventListener("change", showFieldGroups);
 
+  function actionSummary(actionTaken) {
+    if (!actionTaken) return "—";
+    try {
+      const o = JSON.parse(actionTaken);
+      if (o && typeof o.action_type === "string") return o.action_type;
+    } catch (e) { /* ignore */ }
+    return actionTaken.length > 56 ? actionTaken.slice(0, 53) + "…" : actionTaken;
+  }
+
+  function renderTicket(obs) {
+    const body = $("ticketBody");
+    const pills = $("ticketPills");
+    pills.innerHTML = "";
+    if (!obs) {
+      body.textContent = "No observation loaded.";
+      body.classList.add("empty");
+      return;
+    }
+    body.classList.remove("empty");
+    body.textContent = obs.ticket_text != null ? obs.ticket_text : "";
+
+    function addPill(label, value) {
+      if (value === undefined || value === null || value === "") return;
+      const p = document.createElement("div");
+      p.className = "pill";
+      const k = document.createElement("kbd");
+      k.textContent = label + ":";
+      const v = document.createElement("span");
+      v.className = "val";
+      v.textContent = String(value);
+      p.appendChild(k);
+      p.appendChild(v);
+      pills.appendChild(p);
+    }
+
+    const impact = (obs.customer_value || "").toString().toUpperCase();
+    addPill("Impact", impact);
+    addPill("ID", obs.ticket_id);
+    addPill("Tier", obs.customer_tier);
+    addPill("Sentiment", obs.customer_sentiment);
+    addPill("Phase", obs.phase);
+    if (typeof obs.sla_steps_remaining === "number") {
+      addPill("SLA steps left", String(obs.sla_steps_remaining));
+    }
+    if (obs.category_hint) addPill("Hint", obs.category_hint);
+  }
+
+  function renderTimeline(obs) {
+    const list = $("timelineList");
+    list.innerHTML = "";
+    if (!obs || !Array.isArray(obs.history) || obs.history.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "timeline-empty";
+      empty.innerHTML = "No actions yet. Run <strong>Reset</strong>, then <strong>Execute step</strong>.";
+      list.appendChild(empty);
+      return;
+    }
+    obs.history.forEach(function (h) {
+      const item = document.createElement("div");
+      item.className = "timeline-item";
+
+      const row = document.createElement("div");
+      row.className = "timeline-row";
+
+      const main = document.createElement("div");
+      main.className = "tl-main";
+      const sn = document.createElement("span");
+      sn.className = "tl-step-num";
+      sn.textContent = "Step " + h.step + ": ";
+      const an = document.createElement("span");
+      an.className = "tl-action-name";
+      an.textContent = actionSummary(h.action_taken);
+      main.appendChild(sn);
+      main.appendChild(an);
+
+      const rw = document.createElement("div");
+      rw.className = "tl-reward";
+      const r = Number(h.reward_earned);
+      rw.textContent = (r >= 0 ? "+" : "") + r.toFixed(2);
+      if (r < 0) rw.classList.add("neg");
+      else if (r > 0) rw.classList.add("pos");
+
+      row.appendChild(main);
+      row.appendChild(rw);
+      item.appendChild(row);
+
+      if (h.env_feedback) {
+        const fb = document.createElement("div");
+        fb.className = "tl-feedback";
+        fb.textContent = h.env_feedback;
+        item.appendChild(fb);
+      }
+
+      list.appendChild(item);
+    });
+  }
+
   function showPayload(data, opts) {
-    outObs.textContent = data.observation == null ? "null" : pretty(data.observation);
+    const obs = data.observation;
+    outObs.textContent = obs == null ? "null" : pretty(obs);
     outReward.textContent = String(data.reward);
     outDone.textContent = String(data.done);
     outInfo.textContent = pretty(data.info != null ? data.info : {});
+
+    renderTicket(obs);
+    renderTimeline(obs);
 
     mLast.textContent = Number(data.reward).toFixed(2);
     if (opts && opts.addStepReward && typeof data.reward === "number") {
