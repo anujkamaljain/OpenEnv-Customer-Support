@@ -16,6 +16,8 @@ A production-grade reinforcement learning environment for evaluating AI agents o
 
 Agents must classify, route, respond to, escalate, and resolve customer tickets under time pressure, policy constraints, and incomplete information — mirroring the decision-making complexity of a human support team.
 
+**Live deployment:** [anuj2209-openenv-customer-support.hf.space](https://anuj2209-openenv-customer-support.hf.space)
+
 ---
 
 ## Why This Matters
@@ -268,33 +270,186 @@ docker run -p 7860:7860 -e HF_TOKEN=your_token openenv-customer-support
 
 ### HTTP API
 
-The server exposes endpoints on port `7860`:
+The server exposes endpoints on port `7860`.
 
-**Reset an episode:**
+#### POST /reset
+
+Starts a new episode. Body is **optional** — all fields have defaults.
 
 ```bash
+# With parameters
 curl -X POST http://localhost:7860/reset \
   -H "Content-Type: application/json" \
   -d '{"seed": 0, "difficulty": "easy"}'
-```
 
-**Take a step:**
-
-```bash
-curl -X POST http://localhost:7860/step \
+# With empty body (defaults: seed=0, difficulty=null → picks from all tickets)
+curl -X POST http://localhost:7860/reset \
   -H "Content-Type: application/json" \
-  -d '{"action": {"action_type": "classify", "category": "billing", "priority": "high"}}'
+  -d '{}'
+
+# With no body at all (same defaults)
+curl -X POST http://localhost:7860/reset
 ```
 
-**Response format (both endpoints):**
+**Request body fields:**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `seed` | `int` | `0` | Deterministic ticket selection seed |
+| `difficulty` | `string \| null` | `null` | `"easy"`, `"medium"`, `"hard"`, or `null` for all |
+
+**Sample response:**
 
 ```json
 {
-  "observation": { "ticket_id": "EASY-001", "phase": "classified", "..." : "..." },
-  "reward": 0.10,
+  "observation": {
+    "ticket_id": "EASY-001",
+    "ticket_text": "Hi, I forgot my password and can't log in...",
+    "customer_sentiment": "neutral",
+    "customer_tier": "free",
+    "customer_value": "low",
+    "category_hint": "account_access",
+    "phase": "unclassified",
+    "available_actions": ["classify"],
+    "current_step": 0,
+    "max_steps": 8,
+    "sla_steps_remaining": 6,
+    "constraints": [],
+    "history": [],
+    "max_total_reward": 0.45
+  },
+  "reward": 0.0,
   "done": false,
-  "info": { "normalized_score": 0.0, "reward_breakdown": { "..." : "..." } }
+  "info": {
+    "phase": "unclassified",
+    "steps_taken": 0,
+    "normalized_score": 0.0,
+    "max_total_reward": 0.45,
+    "difficulty": "easy"
+  }
 }
+```
+
+#### POST /step
+
+Applies an action. The body must contain an `action` object with `action_type` and its required fields.
+
+**All 6 action types:**
+
+```bash
+# 1. classify
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": {
+      "action_type": "classify",
+      "category": "billing",
+      "priority": "high"
+    }
+  }'
+
+# 2. route
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": {
+      "action_type": "route",
+      "department": "billing"
+    }
+  }'
+
+# 3. respond
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": {
+      "action_type": "respond",
+      "response_text": "We sincerely apologize for the duplicate charge. We are processing your refund immediately.",
+      "tone": "empathetic"
+    }
+  }'
+
+# 4. escalate
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": {
+      "action_type": "escalate",
+      "reason": "Enterprise customer experiencing data loss requires engineering investigation.",
+      "target_team": "engineering"
+    }
+  }'
+
+# 5. resolve
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": {
+      "action_type": "resolve",
+      "resolution_summary": "Duplicate charge refund of $29.99 has been processed. Credit will appear within 3-5 business days.",
+      "offered_compensation": 29.99
+    }
+  }'
+
+# 6. request_info
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": {
+      "action_type": "request_info",
+      "question_to_customer": "Could you share which specific page shows the error and any error messages you see?"
+    }
+  }'
+```
+
+**Sample response:**
+
+```json
+{
+  "observation": {
+    "ticket_id": "EASY-002",
+    "phase": "classified",
+    "available_actions": ["escalate", "route"],
+    "current_step": 1,
+    "sla_steps_remaining": 3,
+    "history": [
+      {
+        "step": 0,
+        "action_taken": "classify",
+        "env_feedback": "Correct classification. Urgency correctly identified (+0.10).",
+        "reward_earned": 0.2
+      }
+    ]
+  },
+  "reward": 0.2,
+  "done": false,
+  "info": {
+    "normalized_score": 0.3636,
+    "reward_breakdown": {
+      "classification": 0.1,
+      "urgency_bonus": 0.1,
+      "repeat_penalty": 0.0,
+      "sla_penalty": 0.0,
+      "total": 0.2
+    }
+  }
+}
+```
+
+#### GET /state
+
+Returns the current observation without advancing the episode.
+
+```bash
+curl http://localhost:7860/state
+```
+
+#### POST /close
+
+Releases the episode. Call before starting a new one.
+
+```bash
+curl -X POST http://localhost:7860/close
 ```
 
 ### Python API
@@ -350,7 +505,7 @@ Go to [huggingface.co/new-space](https://huggingface.co/new-space) and select:
 ### 2. Push the code
 
 ```bash
-git remote add space https://huggingface.co/spaces/YOUR_USERNAME/openenv-customer-support
+git remote add space https://huggingface.co/spaces/Anuj2209/openenv-customer-support
 git push space main
 ```
 
@@ -372,10 +527,10 @@ Once the Space is running (build takes ~30 seconds), test it:
 
 ```bash
 # Health check
-curl https://YOUR_USERNAME-openenv-customer-support.hf.space/
+curl https://anuj2209-openenv-customer-support.hf.space/
 
 # Reset
-curl -X POST https://YOUR_USERNAME-openenv-customer-support.hf.space/reset \
+curl -X POST https://anuj2209-openenv-customer-support.hf.space/reset \
   -H "Content-Type: application/json" \
   -d '{"seed": 0, "difficulty": "easy"}'
 ```
