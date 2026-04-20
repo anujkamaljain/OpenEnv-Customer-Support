@@ -1204,7 +1204,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
   function parseListInput(raw) {
     if (!raw) return [];
     return raw
-      .split(/\n|,/)
+      .split(/\\n|,/)
       .map((part) => part.trim())
       .filter(Boolean);
   }
