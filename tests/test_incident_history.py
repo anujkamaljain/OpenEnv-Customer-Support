@@ -6,7 +6,7 @@ from pathlib import Path
 
 from env.incident_history import HistoricalIncident, IncidentHistoryStore
 
-_HISTORY_PATH = Path("F:/Coding/OpenEnv/tasks/history_incidents.json")
+_HISTORY_PATH = Path(__file__).resolve().parents[1] / "tasks" / "history_incidents.json"
 
 
 def _store() -> IncidentHistoryStore:

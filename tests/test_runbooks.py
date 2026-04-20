@@ -8,7 +8,7 @@ from pathlib import Path
 from env.runbooks import Runbook, RunbookEngine, RunbookStep
 
 
-_RUNBOOKS_PATH = Path("F:/Coding/OpenEnv/tasks/runbooks.json")
+_RUNBOOKS_PATH = Path(__file__).resolve().parents[1] / "tasks" / "runbooks.json"
 
 
 def _engine() -> RunbookEngine:
