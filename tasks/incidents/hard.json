@@ -1,0 +1,569 @@
+[
+  {
+    "incident_id": "HARD-009",
+    "title": "The Everything Outage",
+    "difficulty": "hard",
+    "description": "Database OOM degrades nearly every dependent service.",
+    "root_causes": [
+      {"service": "database", "failure_mode": "oom", "fix_type": "memory_increase"}
+    ],
+    "cascade_chain": ["database", "payments", "analytics", "notifications"],
+    "red_herrings": [
+      {
+        "service": "auth",
+        "symptom": "token refresh latency +200ms",
+        "actual_explanation": "Short-lived key rotation",
+        "misleading_because": "Looks like auth instability"
+      },
+      {
+        "service": "analytics",
+        "symptom": "CPU at 95%",
+        "actual_explanation": "Expected heavy report window",
+        "misleading_because": "Appears like runaway job"
+      },
+      {
+        "service": "notifications",
+        "symptom": "spike in queue warnings",
+        "actual_explanation": "Downstream payment retries",
+        "misleading_because": "Looks like notification root issue"
+      }
+    ],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-H1", "tier": "enterprise", "account_name": "Centauri"},
+      {"customer_id": "CUST-H2", "tier": "enterprise", "account_name": "LedgerWorks"},
+      {"customer_id": "CUST-H3", "tier": "pro", "account_name": "Nimbus"},
+      {"customer_id": "CUST-H4", "tier": "pro", "account_name": "Pioneer"},
+      {"customer_id": "CUST-H5", "tier": "free", "account_name": "Lumen"},
+      {"customer_id": "CUST-H6", "tier": "enterprise", "account_name": "Marlin"},
+      {"customer_id": "CUST-H7", "tier": "pro", "account_name": "Orchard"},
+      {"customer_id": "CUST-H8", "tier": "enterprise", "account_name": "Quanta"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-H9-001",
+        "title": "Platform-wide timeout",
+        "body": "Orders, dashboards, and notifications are timing out.",
+        "customer_tier": "enterprise",
+        "priority": "critical"
+      }
+    ],
+    "dynamic_ticket_schedule": [
+      {
+        "trigger_step": 5,
+        "ticket": {
+          "ticket_id": "T-H9-002",
+          "title": "Escalation threat",
+          "body": "Enterprise account threatens legal escalation due to outage.",
+          "customer_tier": "enterprise",
+          "priority": "critical"
+        }
+      }
+    ],
+    "initial_policies": {"refund_cap": 400, "escalation_required": true},
+    "policy_drift_schedule": [
+      {"step": 15, "key": "refund_cap", "value": 250},
+      {"step": 30, "key": "escalation_required", "value": true}
+    ],
+    "kb_articles": [
+      {
+        "article_id": "KB-H-1",
+        "title": "DB OOM handling",
+        "summary": "Increase memory and isolate heavy analytics load.",
+        "is_accurate": true
+      },
+      {
+        "article_id": "KB-H-2",
+        "title": "Notification overflow",
+        "summary": "Restart notification workers first.",
+        "is_accurate": false
+      }
+    ],
+    "max_steps": 70,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.03},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.025},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.035}
+    },
+    "max_total_reward": 1.5,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "query_kb", "check_policy", "apply_fix", "verify_fix"]
+  },
+  {
+    "incident_id": "HARD-010",
+    "title": "Phantom Billing",
+    "difficulty": "hard",
+    "description": "Payments succeed but billing records duplicates due to database lag.",
+    "root_causes": [
+      {"service": "database", "failure_mode": "replication_lag", "fix_type": "schema_migration"}
+    ],
+    "cascade_chain": ["database", "payments"],
+    "red_herrings": [
+      {
+        "service": "payments",
+        "symptom": "gateway timeout warnings",
+        "actual_explanation": "Retries after duplicate detection",
+        "misleading_because": "Looks like payment gateway fault"
+      }
+    ],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-H9", "tier": "enterprise", "account_name": "Beacon"},
+      {"customer_id": "CUST-H10", "tier": "pro", "account_name": "Silver Oak"},
+      {"customer_id": "CUST-H11", "tier": "enterprise", "account_name": "TerraPay"},
+      {"customer_id": "CUST-H12", "tier": "pro", "account_name": "Nova"},
+      {"customer_id": "CUST-H13", "tier": "free", "account_name": "Hublet"},
+      {"customer_id": "CUST-H14", "tier": "enterprise", "account_name": "OmniCore"},
+      {"customer_id": "CUST-H15", "tier": "pro", "account_name": "Pilot"},
+      {"customer_id": "CUST-H48", "tier": "enterprise", "account_name": "Elmstone"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-H10-001",
+        "title": "Duplicate invoices",
+        "body": "Billing shows duplicated charges while checkout appears successful.",
+        "customer_tier": "enterprise",
+        "priority": "high"
+      }
+    ],
+    "dynamic_ticket_schedule": [],
+    "initial_policies": {"refund_cap": 500, "escalation_required": true},
+    "policy_drift_schedule": [
+      {"step": 20, "key": "refund_cap", "value": 300},
+      {"step": 28, "key": "escalation_required", "value": false}
+    ],
+    "kb_articles": [
+      {
+        "article_id": "KB-H-3",
+        "title": "Duplicate billing issue",
+        "summary": "Restart payments workers to clear duplicates.",
+        "is_accurate": false
+      },
+      {
+        "article_id": "KB-H-4",
+        "title": "DB replication mismatch",
+        "summary": "Repair lagging replica and rebuild reconciliation index.",
+        "is_accurate": true
+      }
+    ],
+    "max_steps": 70,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.03},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.025},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.035}
+    },
+    "max_total_reward": 1.5,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "query_kb", "apply_fix", "resolve_tickets"]
+  },
+  {
+    "incident_id": "HARD-011",
+    "title": "Security Breach Masquerade",
+    "difficulty": "hard",
+    "description": "Incident appears like credential abuse but is auth rate limiting.",
+    "root_causes": [
+      {"service": "auth", "failure_mode": "rate_limiting", "fix_type": "restart_service"}
+    ],
+    "cascade_chain": ["auth", "payments"],
+    "red_herrings": [
+      {
+        "service": "auth",
+        "symptom": "spike in failed login attempts",
+        "actual_explanation": "Automated mobile refresh clients",
+        "misleading_because": "Resembles active credential stuffing"
+      },
+      {
+        "service": "database",
+        "symptom": "new session bursts",
+        "actual_explanation": "Retry loops from auth rejection",
+        "misleading_because": "Looks like DB hotspot attack"
+      },
+      {
+        "service": "analytics",
+        "symptom": "anomaly alert score high",
+        "actual_explanation": "Detection model drift",
+        "misleading_because": "Correlates with login failures"
+      }
+    ],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-H16", "tier": "enterprise", "account_name": "Helix"},
+      {"customer_id": "CUST-H17", "tier": "pro", "account_name": "Granite"},
+      {"customer_id": "CUST-H18", "tier": "enterprise", "account_name": "Cirrus"},
+      {"customer_id": "CUST-H19", "tier": "pro", "account_name": "Redwood"},
+      {"customer_id": "CUST-H20", "tier": "free", "account_name": "Skipper"},
+      {"customer_id": "CUST-H21", "tier": "enterprise", "account_name": "Drift"},
+      {"customer_id": "CUST-H49", "tier": "pro", "account_name": "True North"},
+      {"customer_id": "CUST-H50", "tier": "enterprise", "account_name": "Windmill"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-H11-001",
+        "title": "Possible account breach",
+        "body": "Customers report repeated login lockouts and suspect compromise.",
+        "customer_tier": "enterprise",
+        "priority": "critical"
+      }
+    ],
+    "dynamic_ticket_schedule": [],
+    "initial_policies": {"refund_cap": 300, "escalation_required": true},
+    "policy_drift_schedule": [
+      {"step": 18, "key": "refund_cap", "value": 200},
+      {"step": 40, "key": "escalation_required", "value": true}
+    ],
+    "kb_articles": [
+      {
+        "article_id": "KB-H-5",
+        "title": "Security event triage",
+        "summary": "Treat as breach and rotate all credentials immediately.",
+        "is_accurate": false
+      },
+      {
+        "article_id": "KB-H-6",
+        "title": "Auth limiter saturation",
+        "summary": "Reset limiter state and tune burst thresholds.",
+        "is_accurate": true
+      }
+    ],
+    "max_steps": 70,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.03},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.025},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.035}
+    },
+    "max_total_reward": 1.5,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "fetch_logs", "apply_fix", "verify_fix"]
+  },
+  {
+    "incident_id": "HARD-012",
+    "title": "The Slow Burn",
+    "difficulty": "hard",
+    "description": "Replication lag worsens gradually before becoming visible in outages.",
+    "root_causes": [
+      {"service": "database", "failure_mode": "replication_lag", "fix_type": "schema_migration"}
+    ],
+    "cascade_chain": ["database", "analytics", "payments", "notifications"],
+    "red_herrings": [
+      {
+        "service": "payments",
+        "symptom": "small latency spikes",
+        "actual_explanation": "Queued writes from lagging replicas",
+        "misleading_because": "Looks benign early on"
+      },
+      {
+        "service": "analytics",
+        "symptom": "cache miss increase",
+        "actual_explanation": "Stale replica reads",
+        "misleading_because": "Can look like cache tuning issue"
+      },
+      {
+        "service": "auth",
+        "symptom": "minor token verification delay",
+        "actual_explanation": "Shared DB read pressure",
+        "misleading_because": "Suggests auth bug"
+      }
+    ],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-H22", "tier": "enterprise", "account_name": "Tangent"},
+      {"customer_id": "CUST-H23", "tier": "enterprise", "account_name": "Keen"},
+      {"customer_id": "CUST-H24", "tier": "pro", "account_name": "Atlas"},
+      {"customer_id": "CUST-H25", "tier": "pro", "account_name": "Orbit"},
+      {"customer_id": "CUST-H26", "tier": "free", "account_name": "Field"},
+      {"customer_id": "CUST-H27", "tier": "enterprise", "account_name": "Juniper"},
+      {"customer_id": "CUST-H51", "tier": "enterprise", "account_name": "Cobalt"},
+      {"customer_id": "CUST-H52", "tier": "pro", "account_name": "Avenue"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-H12-001",
+        "title": "Intermittent slow transactions",
+        "body": "Checkout is slow but not fully failing yet.",
+        "customer_tier": "pro",
+        "priority": "high"
+      }
+    ],
+    "dynamic_ticket_schedule": [
+      {
+        "trigger_step": 8,
+        "ticket": {
+          "ticket_id": "T-H12-002",
+          "title": "Report data stale",
+          "body": "Analytics dashboard falls behind live transactions.",
+          "customer_tier": "enterprise",
+          "priority": "high"
+        }
+      }
+    ],
+    "initial_policies": {"refund_cap": 220, "escalation_required": false},
+    "policy_drift_schedule": [
+      {"step": 22, "key": "escalation_required", "value": true},
+      {"step": 35, "key": "refund_cap", "value": 150}
+    ],
+    "kb_articles": [
+      {
+        "article_id": "KB-H-7",
+        "title": "Slow burn investigation",
+        "summary": "Track DB replica lag trend over multiple probes.",
+        "is_accurate": true
+      },
+      {
+        "article_id": "KB-H-8",
+        "title": "Payment latency playbook",
+        "summary": "Restart payments first for immediate relief.",
+        "is_accurate": false
+      }
+    ],
+    "max_steps": 70,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.03},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.025},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.035}
+    },
+    "max_total_reward": 1.5,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "probe_service", "apply_fix", "verify_fix"]
+  },
+  {
+    "incident_id": "HARD-013",
+    "title": "Policy Trap",
+    "difficulty": "hard",
+    "description": "Correct fix path requires checking drifted policy before compensation.",
+    "root_causes": [
+      {"service": "payments", "failure_mode": "validation_errors", "fix_type": "config_change"}
+    ],
+    "cascade_chain": ["payments", "notifications"],
+    "red_herrings": [
+      {
+        "service": "database",
+        "symptom": "short replication jitter",
+        "actual_explanation": "Transient write burst",
+        "misleading_because": "Looks like DB origin"
+      },
+      {
+        "service": "auth",
+        "symptom": "minor latency rise",
+        "actual_explanation": "Backpressure from payment retries",
+        "misleading_because": "Suggests auth bottleneck"
+      },
+      {
+        "service": "analytics",
+        "symptom": "late metrics stream",
+        "actual_explanation": "Delayed event ingestion",
+        "misleading_because": "Appears like analytics outage"
+      }
+    ],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-H28", "tier": "enterprise", "account_name": "Bridge"},
+      {"customer_id": "CUST-H29", "tier": "enterprise", "account_name": "Sable"},
+      {"customer_id": "CUST-H30", "tier": "pro", "account_name": "Mercury"},
+      {"customer_id": "CUST-H31", "tier": "pro", "account_name": "Temple"},
+      {"customer_id": "CUST-H32", "tier": "free", "account_name": "Pocket"},
+      {"customer_id": "CUST-H33", "tier": "enterprise", "account_name": "Aegis"},
+      {"customer_id": "CUST-H53", "tier": "enterprise", "account_name": "Canopy"},
+      {"customer_id": "CUST-H54", "tier": "pro", "account_name": "Lowland"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-H13-001",
+        "title": "Payments rejected after policy update",
+        "body": "Customers see validation failure when paying invoices.",
+        "customer_tier": "enterprise",
+        "priority": "high"
+      }
+    ],
+    "dynamic_ticket_schedule": [],
+    "initial_policies": {"refund_cap": 100, "escalation_required": false},
+    "policy_drift_schedule": [
+      {"step": 10, "key": "refund_cap", "value": 50},
+      {"step": 12, "key": "escalation_required", "value": true}
+    ],
+    "kb_articles": [
+      {
+        "article_id": "KB-H-9",
+        "title": "Validation errors",
+        "summary": "Apply payment config patch, then verify current policy caps.",
+        "is_accurate": true
+      },
+      {
+        "article_id": "KB-H-10",
+        "title": "Compensation matrix",
+        "summary": "Offer standard $150 credit for enterprise incidents.",
+        "is_accurate": false
+      }
+    ],
+    "max_steps": 70,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.03},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.025},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.035}
+    },
+    "max_total_reward": 1.5,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "check_policy", "apply_fix", "resolve_tickets"]
+  },
+  {
+    "incident_id": "HARD-014",
+    "title": "Cross-System Ghost",
+    "difficulty": "hard",
+    "description": "Symptoms start in notifications but root cause is deep in database chain.",
+    "root_causes": [
+      {"service": "database", "failure_mode": "connection_pool_exhaustion", "fix_type": "restart_service"}
+    ],
+    "cascade_chain": ["database", "payments", "notifications"],
+    "red_herrings": [
+      {
+        "service": "notifications",
+        "symptom": "template rendering errors",
+        "actual_explanation": "Payload truncation from payment retries",
+        "misleading_because": "Looks like local notification bug"
+      },
+      {
+        "service": "analytics",
+        "symptom": "dashboard delay",
+        "actual_explanation": "Downstream from DB saturation",
+        "misleading_because": "Competes for investigation priority"
+      },
+      {
+        "service": "auth",
+        "symptom": "increased token issue rate",
+        "actual_explanation": "Retry storms from payment failures",
+        "misleading_because": "Appears as independent auth incident"
+      }
+    ],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-H34", "tier": "enterprise", "account_name": "Verde"},
+      {"customer_id": "CUST-H35", "tier": "pro", "account_name": "Boreal"},
+      {"customer_id": "CUST-H36", "tier": "enterprise", "account_name": "Willow"},
+      {"customer_id": "CUST-H37", "tier": "pro", "account_name": "Vale"},
+      {"customer_id": "CUST-H38", "tier": "free", "account_name": "Mica"},
+      {"customer_id": "CUST-H39", "tier": "enterprise", "account_name": "Cinder"},
+      {"customer_id": "CUST-H55", "tier": "enterprise", "account_name": "Marble Bay"},
+      {"customer_id": "CUST-H56", "tier": "pro", "account_name": "Summerset"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-H14-001",
+        "title": "Notification failures",
+        "body": "Customers receive no payment confirmation messages.",
+        "customer_tier": "enterprise",
+        "priority": "high"
+      }
+    ],
+    "dynamic_ticket_schedule": [],
+    "initial_policies": {"refund_cap": 220, "escalation_required": true},
+    "policy_drift_schedule": [
+      {"step": 16, "key": "refund_cap", "value": 180},
+      {"step": 34, "key": "escalation_required", "value": true}
+    ],
+    "kb_articles": [
+      {
+        "article_id": "KB-H-11",
+        "title": "Notifications troubleshooting",
+        "summary": "Restart notification queue and clear templates.",
+        "is_accurate": false
+      },
+      {
+        "article_id": "KB-H-12",
+        "title": "DB pool chain failure",
+        "summary": "Repair DB pool limits and verify payment downstream recovery.",
+        "is_accurate": true
+      }
+    ],
+    "max_steps": 70,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.03},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.025},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.035}
+    },
+    "max_total_reward": 1.5,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "probe_service", "apply_fix", "verify_fix"]
+  },
+  {
+    "incident_id": "HARD-015",
+    "title": "Enterprise Meltdown",
+    "difficulty": "hard",
+    "description": "Severe technical outage intersects with legal pressure and VP updates.",
+    "root_causes": [
+      {"service": "database", "failure_mode": "oom", "fix_type": "memory_increase"}
+    ],
+    "cascade_chain": ["database", "payments", "notifications", "analytics"],
+    "red_herrings": [
+      {
+        "service": "auth",
+        "symptom": "token issuance slowdown",
+        "actual_explanation": "Collateral load from retries",
+        "misleading_because": "Looks like auth primary fault"
+      },
+      {
+        "service": "analytics",
+        "symptom": "high query timeout rate",
+        "actual_explanation": "Replica lag under DB pressure",
+        "misleading_because": "Seems like analytics service issue"
+      },
+      {
+        "service": "notifications",
+        "symptom": "queue alarm flood",
+        "actual_explanation": "Payment receipt backlog",
+        "misleading_because": "Creates alert fatigue"
+      }
+    ],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-H40", "tier": "enterprise", "account_name": "Summit"},
+      {"customer_id": "CUST-H41", "tier": "enterprise", "account_name": "Praxis"},
+      {"customer_id": "CUST-H42", "tier": "enterprise", "account_name": "Pillar"},
+      {"customer_id": "CUST-H43", "tier": "pro", "account_name": "Beacon Hill"},
+      {"customer_id": "CUST-H44", "tier": "pro", "account_name": "Harbor"},
+      {"customer_id": "CUST-H45", "tier": "free", "account_name": "Patch"},
+      {"customer_id": "CUST-H46", "tier": "enterprise", "account_name": "Evergreen"},
+      {"customer_id": "CUST-H47", "tier": "pro", "account_name": "Apex"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-H15-001",
+        "title": "Major outage with legal risk",
+        "body": "Enterprise customers report failed transactions and threaten legal action.",
+        "customer_tier": "enterprise",
+        "priority": "critical"
+      }
+    ],
+    "dynamic_ticket_schedule": [
+      {
+        "trigger_step": 6,
+        "ticket": {
+          "ticket_id": "T-H15-002",
+          "title": "VP status request",
+          "body": "Executive team requests immediate incident status update.",
+          "customer_tier": "enterprise",
+          "priority": "high"
+        }
+      }
+    ],
+    "initial_policies": {"refund_cap": 500, "escalation_required": true},
+    "policy_drift_schedule": [
+      {"step": 14, "key": "refund_cap", "value": 350},
+      {"step": 24, "key": "refund_cap", "value": 250}
+    ],
+    "kb_articles": [
+      {
+        "article_id": "KB-H-13",
+        "title": "Enterprise outage response",
+        "summary": "Confirm root cause, escalate, and provide stakeholder updates every 5 steps.",
+        "is_accurate": true
+      },
+      {
+        "article_id": "KB-H-14",
+        "title": "Fastest recovery",
+        "summary": "Restart notifications first to reduce alert volume.",
+        "is_accurate": false
+      }
+    ],
+    "max_steps": 70,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.03},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.03},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.035}
+    },
+    "max_total_reward": 1.5,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "check_policy", "escalate", "apply_fix", "verify_fix"]
+  }
+]

@@ -1,0 +1,78 @@
+[
+  {
+    "runbook_id": "RB-001",
+    "title": "Database OOM Recovery",
+    "incident_type": "database_oom",
+    "steps": [
+      {
+        "step_index": 0,
+        "action_type": "probe_service",
+        "action_params": {"service_name": "database", "check_type": "resources"},
+        "expected_outcome": "high memory usage confirmed",
+        "description": "Check database resource usage"
+      },
+      {
+        "step_index": 1,
+        "action_type": "apply_fix",
+        "action_params": {"service_name": "database", "fix_type": "memory_increase"},
+        "expected_outcome": "database returns to healthy",
+        "description": "Increase memory and restart service safely"
+      },
+      {
+        "step_index": 2,
+        "action_type": "verify_fix",
+        "action_params": {"service_name": "database"},
+        "expected_outcome": "dependent services begin recovery",
+        "description": "Verify database recovery and downstream health"
+      }
+    ],
+    "is_correct_for_incident": true,
+    "outdated_since": null
+  },
+  {
+    "runbook_id": "RB-002",
+    "title": "Legacy Payment 500 Fix",
+    "incident_type": "payment_500",
+    "steps": [
+      {
+        "step_index": 0,
+        "action_type": "apply_fix",
+        "action_params": {"service_name": "payments", "fix_type": "restart_service"},
+        "expected_outcome": "errors clear immediately",
+        "description": "Restart payment service"
+      },
+      {
+        "step_index": 1,
+        "action_type": "verify_fix",
+        "action_params": {"service_name": "payments"},
+        "expected_outcome": "payment endpoints stable",
+        "description": "Verify payment endpoint health"
+      }
+    ],
+    "is_correct_for_incident": false,
+    "outdated_since": "2025-09-01"
+  },
+  {
+    "runbook_id": "RB-003",
+    "title": "Auth Limiter Recovery",
+    "incident_type": "auth_rate_limiting",
+    "steps": [
+      {
+        "step_index": 0,
+        "action_type": "probe_service",
+        "action_params": {"service_name": "auth", "check_type": "config"},
+        "expected_outcome": "limiter saturation confirmed",
+        "description": "Inspect limiter and auth config health"
+      },
+      {
+        "step_index": 1,
+        "action_type": "apply_fix",
+        "action_params": {"service_name": "auth", "fix_type": "restart_service"},
+        "expected_outcome": "rate limiting normalizes",
+        "description": "Reset limiter state and restart auth"
+      }
+    ],
+    "is_correct_for_incident": true,
+    "outdated_since": null
+  }
+]

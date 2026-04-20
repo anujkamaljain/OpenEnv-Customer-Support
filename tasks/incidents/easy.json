@@ -1,0 +1,146 @@
+[
+  {
+    "incident_id": "EASY-001",
+    "title": "Auth Service Down",
+    "difficulty": "easy",
+    "description": "Login requests fail for multiple customers after an auth outage.",
+    "root_causes": [
+      {"service": "auth", "failure_mode": "token_expiry", "fix_type": "config_change"}
+    ],
+    "cascade_chain": ["auth", "payments", "notifications"],
+    "red_herrings": [],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-E1", "tier": "pro", "account_name": "Northwind"},
+      {"customer_id": "CUST-E2", "tier": "enterprise", "account_name": "Blue Harbor"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-E1-001",
+        "title": "Cannot log in",
+        "body": "Users are blocked at login and token refresh fails.",
+        "customer_tier": "enterprise",
+        "priority": "high"
+      }
+    ],
+    "dynamic_ticket_schedule": [],
+    "initial_policies": {"refund_cap": 200, "escalation_required": true},
+    "policy_drift_schedule": [],
+    "kb_articles": [
+      {
+        "article_id": "KB-AUTH-1",
+        "title": "Auth token refresh issues",
+        "summary": "Rotate token signing config and restart auth safely.",
+        "is_accurate": true
+      }
+    ],
+    "max_steps": 40,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.02},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.02},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.02}
+    },
+    "max_total_reward": 1.0,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "apply_fix", "check_monitoring"]
+  },
+  {
+    "incident_id": "EASY-002",
+    "title": "Database Connection Pool",
+    "difficulty": "easy",
+    "description": "Database rejects new sessions due to exhausted connections.",
+    "root_causes": [
+      {"service": "database", "failure_mode": "connection_pool_exhaustion", "fix_type": "restart_service"}
+    ],
+    "cascade_chain": ["database", "payments", "analytics"],
+    "red_herrings": [],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-E3", "tier": "pro", "account_name": "Atlas Retail"},
+      {"customer_id": "CUST-E4", "tier": "pro", "account_name": "Coastline"},
+      {"customer_id": "CUST-E5", "tier": "enterprise", "account_name": "Fintrax"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-E2-001",
+        "title": "Transactions timing out",
+        "body": "Payments time out and order confirmation stalls.",
+        "customer_tier": "pro",
+        "priority": "medium"
+      }
+    ],
+    "dynamic_ticket_schedule": [
+      {
+        "trigger_step": 3,
+        "ticket": {
+          "ticket_id": "T-E2-002",
+          "title": "Reporting delayed",
+          "body": "Analytics dashboards have stale data after payment retries.",
+          "customer_tier": "pro",
+          "priority": "low"
+        }
+      }
+    ],
+    "initial_policies": {"refund_cap": 150, "escalation_required": false},
+    "policy_drift_schedule": [],
+    "kb_articles": [
+      {
+        "article_id": "KB-DB-1",
+        "title": "DB pool exhaustion",
+        "summary": "Restart pool manager and verify connection cap.",
+        "is_accurate": true
+      }
+    ],
+    "max_steps": 40,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.02},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.02},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.02}
+    },
+    "max_total_reward": 1.0,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "apply_fix", "verify_fix"]
+  },
+  {
+    "incident_id": "EASY-003",
+    "title": "Notification Queue Overflow",
+    "difficulty": "easy",
+    "description": "Receipts and delivery notifications are delayed.",
+    "root_causes": [
+      {"service": "notifications", "failure_mode": "queue_overflow", "fix_type": "restart_service"}
+    ],
+    "cascade_chain": ["notifications"],
+    "red_herrings": [],
+    "affected_customer_profiles": [
+      {"customer_id": "CUST-E6", "tier": "free", "account_name": "Maple Co"},
+      {"customer_id": "CUST-E7", "tier": "pro", "account_name": "Broadway Labs"}
+    ],
+    "initial_tickets": [
+      {
+        "ticket_id": "T-E3-001",
+        "title": "No receipt email",
+        "body": "Customers complete checkout but do not receive receipts.",
+        "customer_tier": "pro",
+        "priority": "medium"
+      }
+    ],
+    "dynamic_ticket_schedule": [],
+    "initial_policies": {"refund_cap": 100, "escalation_required": false},
+    "policy_drift_schedule": [],
+    "kb_articles": [
+      {
+        "article_id": "KB-NOTIF-1",
+        "title": "Notification queue backlog",
+        "summary": "Restart worker pool and clear dead letter queue.",
+        "is_accurate": true
+      }
+    ],
+    "max_steps": 40,
+    "sla_deadlines": {"free": 8, "pro": 6, "enterprise": 4},
+    "stakeholder_config": {
+      "vp": {"initial_patience": 1.0, "decay_per_step": 0.02},
+      "legal": {"initial_patience": 1.0, "decay_per_step": 0.02},
+      "support_lead": {"initial_patience": 1.0, "decay_per_step": 0.02}
+    },
+    "max_total_reward": 1.0,
+    "optimal_tool_sequence": ["check_monitoring", "probe_service", "apply_fix", "resolve_tickets"]
+  }
+]

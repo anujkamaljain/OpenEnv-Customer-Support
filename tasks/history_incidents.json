@@ -1,0 +1,38 @@
+[
+  {
+    "incident_id": "HIST-001",
+    "date": "2025-10-02",
+    "title": "Database OOM during payroll batch",
+    "root_cause": "database oom",
+    "resolution": "increased memory and throttled analytics batch",
+    "services_affected": ["database", "payments", "analytics"],
+    "is_relevant_to_current": true
+  },
+  {
+    "incident_id": "HIST-002",
+    "date": "2025-11-14",
+    "title": "Auth rate limit saturation",
+    "root_cause": "auth rate_limiting",
+    "resolution": "reset rate limiter and tuned burst settings",
+    "services_affected": ["auth", "payments"],
+    "is_relevant_to_current": true
+  },
+  {
+    "incident_id": "HIST-003",
+    "date": "2025-12-20",
+    "title": "Notification provider outage",
+    "root_cause": "external smtp outage",
+    "resolution": "failed over to secondary provider",
+    "services_affected": ["notifications"],
+    "is_relevant_to_current": false
+  },
+  {
+    "incident_id": "HIST-004",
+    "date": "2026-01-09",
+    "title": "Payment duplicate records",
+    "root_cause": "idempotency failure",
+    "resolution": "patched replay guard and cleaned duplicates",
+    "services_affected": ["payments", "database"],
+    "is_relevant_to_current": true
+  }
+]

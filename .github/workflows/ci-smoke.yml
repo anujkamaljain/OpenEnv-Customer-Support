@@ -1,0 +1,46 @@
+name: ci-smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+      - name: API smoke (/reset /state /step)
+        run: |
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from server.app import app
+
+          client = TestClient(app)
+          reset = client.post("/reset", json={"mode": "incident", "difficulty": "easy", "seed": 0})
+          assert reset.status_code == 200, reset.text
+          session_id = reset.json()["info"]["session_id"]
+          headers = {"X-Session-ID": session_id}
+
+          state = client.get("/state", headers=headers)
+          assert state.status_code == 200, state.text
+          assert state.json()["observation"]["mode"] == "incident"
+
+          step = client.post("/step", headers=headers, json={"action": {"action_type": "check_monitoring"}})
+          assert step.status_code == 200, step.text
+          print("smoke-ok")
+          PY

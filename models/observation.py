@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -45,3 +45,18 @@ class Observation(BaseModel):
     sla_steps_remaining: int = 0
     customer_value: Literal["low", "medium", "high"] = "medium"
     max_total_reward: float = 1.0
+
+    # --- v3 incident-mode extensions ---
+    incident_id: str | None = None
+    incident_title: str | None = None
+    mode: Literal["ticket", "incident"] = "ticket"
+    system_status: dict[str, str] | None = None
+    active_alerts: list[str] | None = None
+    tool_results: dict[str, Any] | None = None
+    known_facts: dict[str, Any] | None = None
+    active_policies: dict[str, Any] | None = None
+    stakeholder_patience: dict[str, float] | None = None
+    pending_customer_tickets: int = 0
+    incident_phase: Literal["triage", "investigation", "response", "resolution"] | None = None
+    suggested_runbook: dict[str, Any] | None = None
+    total_incident_cost: float | None = None

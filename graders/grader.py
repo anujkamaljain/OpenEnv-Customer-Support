@@ -211,3 +211,44 @@ class DeterministicGrader:
 
         penalty = constraints_violated * 0.05
         return round(max(0.0, min(raw - penalty, 1.0)), 4)
+
+    @staticmethod
+    def grade_incident_episode(
+        *,
+        root_cause_identified: bool,
+        fix_effective: bool,
+        customer_scores: list[float],
+        tool_efficiency: float,
+        sla_compliance_rate: float,
+        stakeholder_satisfaction: float,
+        policy_compliance_rate: float,
+        postmortem_quality: float,
+        kb_contribution_quality: float,
+    ) -> float:
+        """Compute incident-mode multi-objective score normalized to [0, 1]."""
+        customer_handling = (
+            sum(customer_scores) / len(customer_scores) if customer_scores else 0.0
+        )
+
+        root_s = 1.0 if root_cause_identified else 0.0
+        fix_s = 1.0 if fix_effective else 0.0
+        efficiency_s = max(0.0, min(tool_efficiency, 1.0))
+        sla_s = max(0.0, min(sla_compliance_rate, 1.0))
+        stakeholder_s = max(0.0, min(stakeholder_satisfaction, 1.0))
+        policy_s = max(0.0, min(policy_compliance_rate, 1.0))
+        postmortem_s = max(0.0, min(postmortem_quality, 1.0))
+        kb_s = max(0.0, min(kb_contribution_quality, 1.0))
+        customer_s = max(0.0, min(customer_handling, 1.0))
+
+        score = (
+            0.20 * root_s
+            + 0.15 * fix_s
+            + 0.15 * customer_s
+            + 0.10 * efficiency_s
+            + 0.10 * sla_s
+            + 0.10 * stakeholder_s
+            + 0.10 * policy_s
+            + 0.05 * postmortem_s
+            + 0.05 * kb_s
+        )
+        return round(max(0.0, min(score, 1.0)), 4)
