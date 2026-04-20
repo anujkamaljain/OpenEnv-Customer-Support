@@ -145,19 +145,24 @@ async def collect_trajectories(
     return rows, reward_history
 
 
-def require_training_stack() -> tuple[object, object, object, object]:
-    """Import optional training libraries with a clear install message."""
+def require_training_stack() -> tuple[object, object, object, object | None]:
+    """Import training libraries with optional Unsloth acceleration."""
     try:
         from datasets import Dataset
         from trl import GRPOConfig, GRPOTrainer
-
-        from unsloth import FastLanguageModel
     except ImportError as exc:
         raise RuntimeError(
             "Missing training dependencies. Install in Colab with:\n"
-            'pip install "pydantic>=2.12,<3" "click<8.2" unsloth "trl>=0.15" '
-            "datasets peft bitsandbytes mergekit llm-blender"
+            'pip install "trl>=0.15" datasets peft bitsandbytes '
+            "llm-blender accelerate transformers"
         ) from exc
+
+    try:
+        from unsloth import FastLanguageModel
+    except ImportError:
+        FastLanguageModel = None
+        print("[train] unsloth not found; using transformers+peft fallback.")
+
     return Dataset, GRPOConfig, GRPOTrainer, FastLanguageModel
 
 
@@ -209,27 +214,51 @@ def main() -> None:
         (row.prompt, row.completion): row.reward for row in trajectories
     }
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        "Qwen/Qwen2.5-3B-Instruct",
-        max_seq_length=4096,
-        load_in_4bit=True,
-        dtype=None,
-    )
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=16,
-        lora_alpha=16,
-        lora_dropout=0,
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
-    )
+    model_name = "Qwen/Qwen2.5-3B-Instruct"
+    target_modules = [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+    ]
+
+    if FastLanguageModel is not None:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name,
+            max_seq_length=4096,
+            load_in_4bit=True,
+            dtype=None,
+        )
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=16,
+            lora_alpha=16,
+            lora_dropout=0,
+            target_modules=target_modules,
+        )
+    else:
+        from peft import LoraConfig, get_peft_model
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+        bnb_cfg = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            device_map="auto",
+            quantization_config=bnb_cfg,
+        )
+        peft_cfg = LoraConfig(
+            r=16,
+            lora_alpha=16,
+            lora_dropout=0.0,
+            target_modules=target_modules,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, peft_cfg)
 
     def reward_function(
         prompts: list[str],
