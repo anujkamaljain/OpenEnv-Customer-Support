@@ -155,7 +155,8 @@ def require_training_stack() -> tuple[object, object, object, object]:
     except ImportError as exc:
         raise RuntimeError(
             "Missing training dependencies. Install in Colab with:\n"
-            'pip install unsloth "trl>=0.15" datasets peft bitsandbytes mergekit'
+            'pip install "pydantic>=2.12,<3" "click<8.2" unsloth "trl>=0.15" '
+            "datasets peft bitsandbytes mergekit llm-blender"
         ) from exc
     return Dataset, GRPOConfig, GRPOTrainer, FastLanguageModel
 
