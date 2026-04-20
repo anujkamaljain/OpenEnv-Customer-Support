@@ -15,7 +15,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     HOME=/home/user \
-    WEB_CONCURRENCY=2
+    WEB_CONCURRENCY=1
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import sys,urllib.request; \
@@ -24,4 +24,4 @@ sys.exit(0 if u.status==200 else 1)"
 
 EXPOSE 7860
 
-CMD ["python", "-m", "uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "2"]
+CMD ["python", "-m", "uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]

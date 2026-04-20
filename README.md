@@ -150,7 +150,9 @@ curl http://localhost:7860/reset -X POST \
   -d '{"mode":"incident","difficulty":"easy"}'
 ```
 
-Container defaults to 2 workers and includes a healthcheck on `/health`.
+Container defaults to 1 worker and includes a healthcheck on `/health`.
+This environment keeps episode state in-process, so multi-worker deployment
+without a shared external state backend can cause reset/step session drift.
 
 ## Demo Assets
 
