@@ -311,6 +311,8 @@ def main() -> None:
         config_kwargs["bf16"] = bf16_supported
     if "fp16" in grpo_params:
         config_kwargs["fp16"] = fp16_supported and not bf16_supported
+    if "report_to" in grpo_params:
+        config_kwargs["report_to"] = "none"
     if "max_new_tokens" in grpo_params:
         config_kwargs["max_new_tokens"] = 256
     elif "max_completion_length" in grpo_params:
