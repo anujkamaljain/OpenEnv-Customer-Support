@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import inspect
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -160,18 +159,15 @@ def require_training_stack(*, allow_fallback: bool) -> tuple[object, object, obj
 
     try:
         from unsloth import FastLanguageModel
-    except Exception as exc:
+    except ImportError as exc:
         if not allow_fallback:
             raise RuntimeError(
-                "Unsloth failed to import (often due to shared GPU OOM at import time).\n"
-                f"Underlying error: {type(exc).__name__}: {exc}\n"
-                "Rerun with --allow-fallback to use the transformers+peft fallback path."
+                "Unsloth is required for this run but was not found.\n"
+                "Install dependencies in Colab Step 2 and restart runtime, then rerun.\n"
+                "If you intentionally want the transformers+peft fallback, run with --allow-fallback."
             ) from exc
         FastLanguageModel = None
-        print(
-            f"[train] unsloth import failed ({type(exc).__name__}: {exc}); "
-            "using transformers+peft fallback."
-        )
+        print("[train] unsloth not found; using transformers+peft fallback.")
 
     return Dataset, GRPOConfig, GRPOTrainer, FastLanguageModel
 
@@ -180,15 +176,6 @@ def write_json(path: Path, payload: object) -> None:
     """Write JSON artifact with stable UTF-8 formatting."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
-def bitsandbytes_is_usable() -> bool:
-    """Return True only if bitsandbytes can be imported successfully."""
-    try:
-        import bitsandbytes as _  # noqa: F401
-        return True
-    except Exception:
-        return False
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -250,15 +237,12 @@ def main() -> None:
         "up_proj",
         "down_proj",
     ]
-    use_4bit = bitsandbytes_is_usable()
-    if not use_4bit:
-        print("[train] bitsandbytes unavailable; using non-4bit model loading.")
 
     if FastLanguageModel is not None:
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name,
             max_seq_length=4096,
-            load_in_4bit=use_4bit,
+            load_in_4bit=True,
             dtype=None,
         )
         model = FastLanguageModel.get_peft_model(
@@ -270,23 +254,15 @@ def main() -> None:
         )
     else:
         from peft import LoraConfig, get_peft_model
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-        if use_4bit:
-            from transformers import BitsAndBytesConfig
-
-            bnb_cfg = BitsAndBytesConfig(load_in_4bit=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map="auto",
-                quantization_config=bnb_cfg,
-            )
-        else:
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map="auto",
-            )
+        bnb_cfg = BitsAndBytesConfig(load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            device_map="auto",
+            quantization_config=bnb_cfg,
+        )
         peft_cfg = LoraConfig(
             r=16,
             lora_alpha=16,
@@ -307,58 +283,25 @@ def main() -> None:
             rewards.append(float(reward_lookup.get((prompt, completion), 0.0)))
         return rewards
 
-    try:
-        import torch
-
-        bf16_supported = (
-            torch.cuda.is_available()
-            and torch.cuda.is_bf16_supported()
-        )
-    except Exception:
-        bf16_supported = False
-    fp16_supported = not bf16_supported
-
-    grpo_params = inspect.signature(GRPOConfig).parameters
-    config_kwargs: dict[str, object] = {
-        "output_dir": str(output_dir / "grpo_output"),
-        "num_generations": args.k,
-        "num_train_epochs": 1,
-        "per_device_train_batch_size": 2,
-        "gradient_accumulation_steps": 4,
-        "learning_rate": 5e-6,
-        "logging_steps": 10,
-        "save_steps": 100,
-        "warmup_steps": 25,
-    }
-    if "bf16" in grpo_params:
-        config_kwargs["bf16"] = bf16_supported
-    if "fp16" in grpo_params:
-        config_kwargs["fp16"] = fp16_supported and not bf16_supported
-    if "report_to" in grpo_params:
-        config_kwargs["report_to"] = "none"
-    if "max_new_tokens" in grpo_params:
-        config_kwargs["max_new_tokens"] = 256
-    elif "max_completion_length" in grpo_params:
-        config_kwargs["max_completion_length"] = 256
-    elif "max_length" in grpo_params:
-        config_kwargs["max_length"] = 256
-    config = GRPOConfig(**config_kwargs)
-
-    trainer_params = inspect.signature(GRPOTrainer).parameters
-    trainer_kwargs: dict[str, object] = {
-        "model": model,
-        "reward_funcs": [reward_function],
-        "train_dataset": dataset,
-    }
-    if "config" in trainer_params:
-        trainer_kwargs["config"] = config
-    elif "args" in trainer_params:
-        trainer_kwargs["args"] = config
-    if "tokenizer" in trainer_params:
-        trainer_kwargs["tokenizer"] = tokenizer
-    elif "processing_class" in trainer_params:
-        trainer_kwargs["processing_class"] = tokenizer
-    trainer = GRPOTrainer(**trainer_kwargs)
+    config = GRPOConfig(
+        output_dir=str(output_dir / "grpo_output"),
+        num_generations=args.k,
+        max_new_tokens=256,
+        num_train_epochs=1,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
+        learning_rate=5e-6,
+        logging_steps=10,
+        save_steps=100,
+        warmup_steps=25,
+    )
+    trainer = GRPOTrainer(
+        model=model,
+        reward_funcs=[reward_function],
+        config=config,
+        train_dataset=dataset,
+        tokenizer=tokenizer,
+    )
     trainer.train()
     trainer.save_model(str(output_dir / "trained_adapter"))
 
