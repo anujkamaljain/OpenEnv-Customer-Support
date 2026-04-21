@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -283,25 +284,41 @@ def main() -> None:
             rewards.append(float(reward_lookup.get((prompt, completion), 0.0)))
         return rewards
 
-    config = GRPOConfig(
-        output_dir=str(output_dir / "grpo_output"),
-        num_generations=args.k,
-        max_new_tokens=256,
-        num_train_epochs=1,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=4,
-        learning_rate=5e-6,
-        logging_steps=10,
-        save_steps=100,
-        warmup_steps=25,
-    )
-    trainer = GRPOTrainer(
-        model=model,
-        reward_funcs=[reward_function],
-        config=config,
-        train_dataset=dataset,
-        tokenizer=tokenizer,
-    )
+    grpo_params = inspect.signature(GRPOConfig).parameters
+    config_kwargs: dict[str, object] = {
+        "output_dir": str(output_dir / "grpo_output"),
+        "num_generations": args.k,
+        "num_train_epochs": 1,
+        "per_device_train_batch_size": 2,
+        "gradient_accumulation_steps": 4,
+        "learning_rate": 5e-6,
+        "logging_steps": 10,
+        "save_steps": 100,
+        "warmup_steps": 25,
+    }
+    if "max_new_tokens" in grpo_params:
+        config_kwargs["max_new_tokens"] = 256
+    elif "max_completion_length" in grpo_params:
+        config_kwargs["max_completion_length"] = 256
+    elif "max_length" in grpo_params:
+        config_kwargs["max_length"] = 256
+    config = GRPOConfig(**config_kwargs)
+
+    trainer_params = inspect.signature(GRPOTrainer).parameters
+    trainer_kwargs: dict[str, object] = {
+        "model": model,
+        "reward_funcs": [reward_function],
+        "train_dataset": dataset,
+    }
+    if "config" in trainer_params:
+        trainer_kwargs["config"] = config
+    elif "args" in trainer_params:
+        trainer_kwargs["args"] = config
+    if "tokenizer" in trainer_params:
+        trainer_kwargs["tokenizer"] = tokenizer
+    elif "processing_class" in trainer_params:
+        trainer_kwargs["processing_class"] = tokenizer
+    trainer = GRPOTrainer(**trainer_kwargs)
     trainer.train()
     trainer.save_model(str(output_dir / "trained_adapter"))
 
