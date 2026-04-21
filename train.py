@@ -160,15 +160,18 @@ def require_training_stack(*, allow_fallback: bool) -> tuple[object, object, obj
 
     try:
         from unsloth import FastLanguageModel
-    except ImportError as exc:
+    except Exception as exc:
         if not allow_fallback:
             raise RuntimeError(
-                "Unsloth is required for this run but was not found.\n"
-                "Install dependencies in Colab Step 2 and restart runtime, then rerun.\n"
-                "If you intentionally want the transformers+peft fallback, run with --allow-fallback."
+                "Unsloth failed to import (often due to shared GPU OOM at import time).\n"
+                f"Underlying error: {type(exc).__name__}: {exc}\n"
+                "Rerun with --allow-fallback to use the transformers+peft fallback path."
             ) from exc
         FastLanguageModel = None
-        print("[train] unsloth not found; using transformers+peft fallback.")
+        print(
+            f"[train] unsloth import failed ({type(exc).__name__}: {exc}); "
+            "using transformers+peft fallback."
+        )
 
     return Dataset, GRPOConfig, GRPOTrainer, FastLanguageModel
 
