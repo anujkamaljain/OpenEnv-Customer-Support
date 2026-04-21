@@ -145,8 +145,8 @@ async def collect_trajectories(
     return rows, reward_history
 
 
-def require_training_stack() -> tuple[object, object, object, object | None]:
-    """Import training libraries with optional Unsloth acceleration."""
+def require_training_stack(*, allow_fallback: bool) -> tuple[object, object, object, object | None]:
+    """Import training libraries, requiring Unsloth unless fallback is allowed."""
     try:
         from datasets import Dataset
         from trl import GRPOConfig, GRPOTrainer
@@ -159,7 +159,13 @@ def require_training_stack() -> tuple[object, object, object, object | None]:
 
     try:
         from unsloth import FastLanguageModel
-    except ImportError:
+    except ImportError as exc:
+        if not allow_fallback:
+            raise RuntimeError(
+                "Unsloth is required for this run but was not found.\n"
+                "Install dependencies in Colab Step 2 and restart runtime, then rerun.\n"
+                "If you intentionally want the transformers+peft fallback, run with --allow-fallback."
+            ) from exc
         FastLanguageModel = None
         print("[train] unsloth not found; using transformers+peft fallback.")
 
@@ -180,6 +186,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--output-dir", default="artifacts/train")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--allow-fallback",
+        action="store_true",
+        help="Allow transformers+peft fallback when Unsloth is unavailable.",
+    )
     return parser
 
 
@@ -204,7 +215,9 @@ def main() -> None:
         )
         return
 
-    Dataset, GRPOConfig, GRPOTrainer, FastLanguageModel = require_training_stack()
+    Dataset, GRPOConfig, GRPOTrainer, FastLanguageModel = require_training_stack(
+        allow_fallback=args.allow_fallback
+    )
     dataset_rows = [
         {"prompt": row.prompt, "completion": row.completion, "reward": row.reward}
         for row in trajectories
