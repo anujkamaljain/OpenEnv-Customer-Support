@@ -284,6 +284,17 @@ def main() -> None:
             rewards.append(float(reward_lookup.get((prompt, completion), 0.0)))
         return rewards
 
+    try:
+        import torch
+
+        bf16_supported = (
+            torch.cuda.is_available()
+            and torch.cuda.is_bf16_supported()
+        )
+    except Exception:
+        bf16_supported = False
+    fp16_supported = not bf16_supported
+
     grpo_params = inspect.signature(GRPOConfig).parameters
     config_kwargs: dict[str, object] = {
         "output_dir": str(output_dir / "grpo_output"),
@@ -296,6 +307,10 @@ def main() -> None:
         "save_steps": 100,
         "warmup_steps": 25,
     }
+    if "bf16" in grpo_params:
+        config_kwargs["bf16"] = bf16_supported
+    if "fp16" in grpo_params:
+        config_kwargs["fp16"] = fp16_supported and not bf16_supported
     if "max_new_tokens" in grpo_params:
         config_kwargs["max_new_tokens"] = 256
     elif "max_completion_length" in grpo_params:
