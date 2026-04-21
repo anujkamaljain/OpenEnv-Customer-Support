@@ -179,6 +179,15 @@ def write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def bitsandbytes_is_usable() -> bool:
+    """Return True only if bitsandbytes can be imported successfully."""
+    try:
+        import bitsandbytes as _  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train EICC policy with GRPO.")
     parser.add_argument("--iterations", type=int, default=20)
@@ -238,12 +247,15 @@ def main() -> None:
         "up_proj",
         "down_proj",
     ]
+    use_4bit = bitsandbytes_is_usable()
+    if not use_4bit:
+        print("[train] bitsandbytes unavailable; using non-4bit model loading.")
 
     if FastLanguageModel is not None:
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name,
             max_seq_length=4096,
-            load_in_4bit=True,
+            load_in_4bit=use_4bit,
             dtype=None,
         )
         model = FastLanguageModel.get_peft_model(
@@ -255,15 +267,23 @@ def main() -> None:
         )
     else:
         from peft import LoraConfig, get_peft_model
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from transformers import AutoModelForCausalLM, AutoTokenizer
 
         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-        bnb_cfg = BitsAndBytesConfig(load_in_4bit=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map="auto",
-            quantization_config=bnb_cfg,
-        )
+        if use_4bit:
+            from transformers import BitsAndBytesConfig
+
+            bnb_cfg = BitsAndBytesConfig(load_in_4bit=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map="auto",
+                quantization_config=bnb_cfg,
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map="auto",
+            )
         peft_cfg = LoraConfig(
             r=16,
             lora_alpha=16,
