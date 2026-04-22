@@ -412,12 +412,25 @@ def main() -> None:
         k=args.k,
     )
     trainer_params = inspect.signature(GRPOTrainer).parameters
-    trainer_kwargs: dict[str, object] = {
-        "model": model,
-        "reward_funcs": [reward_function],
-        "config": config,
-        "train_dataset": dataset,
-    }
+    trainer_kwargs: dict[str, object] = {"model": model}
+
+    # TRL / Unsloth naming drift: some versions use `config`, others `args`.
+    if "config" in trainer_params:
+        trainer_kwargs["config"] = config
+    elif "args" in trainer_params:
+        trainer_kwargs["args"] = config
+
+    # Reward callback naming is stable in recent TRL but keep compatibility.
+    if "reward_funcs" in trainer_params:
+        trainer_kwargs["reward_funcs"] = [reward_function]
+    elif "reward_function" in trainer_params:
+        trainer_kwargs["reward_function"] = reward_function
+
+    if "train_dataset" in trainer_params:
+        trainer_kwargs["train_dataset"] = dataset
+    elif "dataset" in trainer_params:
+        trainer_kwargs["dataset"] = dataset
+
     if "tokenizer" in trainer_params:
         trainer_kwargs["tokenizer"] = tokenizer
     elif "processing_class" in trainer_params:
