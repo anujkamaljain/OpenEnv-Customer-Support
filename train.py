@@ -305,7 +305,8 @@ def _build_grpo_config(
     kwargs: dict[str, object] = {
         "output_dir": str(output_dir / "grpo_output"),
         "num_train_epochs": 1,
-        "learning_rate": 5e-6,
+        # More conservative LR improves PPO/GRPO stability when clip stats are saturated.
+        "learning_rate": 2e-6,
         "logging_steps": 5,
         "save_steps": 100,
         "warmup_steps": 10,
@@ -471,6 +472,10 @@ def main() -> None:
                 return True
         return False
 
+    def _looks_terminated_json(text: str) -> bool:
+        stripped = text.strip()
+        return stripped.endswith("}")
+
     def reward_function(
         prompts: list[str],
         completions: list[str],
@@ -484,7 +489,13 @@ def main() -> None:
             if action_payload is None:
                 # Partial credit for effort even without valid JSON so GRPO
                 # always sees some variance instead of a constant floor.
-                rewards.append(-0.02 if _mentions_known_action(completion) else -0.08)
+                if not _looks_terminated_json(completion):
+                    # Heavily penalize likely max-length truncation / unterminated payloads.
+                    rewards.append(-0.25)
+                elif _mentions_known_action(completion):
+                    rewards.append(-0.05)
+                else:
+                    rewards.append(-0.10)
                 continue
 
             reward_stats["valid_json"] += 1
@@ -534,9 +545,13 @@ def main() -> None:
 
             # Penalize noisy / long outputs, reward concise JSON.
             completion_len = len(completion)
-            if completion_len <= 160:
+            if completion_len <= 120:
                 score += 0.01
             elif completion_len > 400:
+                score -= 0.40
+            elif completion_len > 240:
+                score -= 0.20
+            elif completion_len > 160:
                 score -= 0.03
 
             rewards.append(max(-1.0, min(1.0, score)))
