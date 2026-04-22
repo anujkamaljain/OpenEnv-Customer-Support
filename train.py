@@ -328,12 +328,12 @@ def _build_grpo_config(
     # GRPO enforces per_device_train_batch_size == num_generations.
     # To increase effective batch size, raise gradient_accumulation_steps.
     if "per_device_train_batch_size" in params:
-        kwargs["per_device_train_batch_size"] = k
+        kwargs["per_device_train_batch_size"] = 2
     elif "train_batch_size" in params:
-        kwargs["train_batch_size"] = k
+        kwargs["train_batch_size"] = 2
 
     if "gradient_accumulation_steps" in params:
-        kwargs["gradient_accumulation_steps"] = 4
+        kwargs["gradient_accumulation_steps"] = 2
 
     # Encourage diverse generations so GRPO gets meaningful reward variance.
     if "temperature" in params:
