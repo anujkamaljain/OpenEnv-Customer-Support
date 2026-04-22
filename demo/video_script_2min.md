@@ -1,26 +1,32 @@
 # 2-Minute Video Script
 
-## 0:00 - 0:20 Hook
+## 0:00 - 0:18 Hook
 
-"It is 3 AM. Payment alerts are firing, customers are escalating, and your services are cascading.  
-Can an AI agent run a real incident response playbook under pressure?"
+"It is 3 AM. Payments are failing, alerts are noisy, and stakeholders are escalating.  
+Can an AI agent resolve this without guessing?"
 
-## 0:20 - 0:55 Problem
+## 0:18 - 0:45 Problem
 
-"Most benchmarks test isolated tasks.  
-Real operations require multi-step diagnosis, uncertain evidence, changing policies, and communication with stakeholders."
+"Most AI benchmarks test isolated skills.  
+Real enterprise incidents require partial observability, tool usage, policy-aware decisions, and long-horizon execution."
 
-## 0:55 - 1:25 Environment
+## 0:45 - 1:15 Environment
 
-"EICC simulates a fintech incident world with 5 connected services, 8 enterprise subsystems, and 21 actions.  
-The agent cannot see root cause directly; it must investigate using tools."
+"We built EICC on OpenEnv:
+- 5 cascading services,
+- 8 enterprise systems,
+- 21 typed actions across triage, investigation, response, and resolution.
 
-## 1:25 - 1:45 Before vs After
+The agent cannot see root cause directly. It must query tools and update beliefs."
 
-"Baseline behavior tends to guess and waste fix attempts.  
-Trained behavior starts with monitoring, verifies evidence, applies root-cause fixes, and resolves systematically."
+## 1:15 - 1:43 Training + Evidence
 
-## 1:45 - 2:00 Close
+"We train with GRPO in Colab using Unsloth + TRL, then compare baseline vs trained policy.
+We track normalized reward, raw cumulative reward, root-cause accuracy, and long-horizon consistency."
 
-"Everything is deterministic, reproducible, and OpenEnv-compatible.  
-This is a training ground for next-generation AI operations agents."
+"Result snapshot: baseline tends to accumulate negative raw reward, while trained policy shifts positive and improves root-cause handling."
+
+## 1:43 - 2:00 Close
+
+"EICC is deterministic, reproducible, and deployed on Hugging Face Spaces.  
+It is a practical benchmark for training AI incident commanders in multi-app enterprise workflows."

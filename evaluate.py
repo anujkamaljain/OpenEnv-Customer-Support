@@ -18,15 +18,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from env.environment import CustomerSupportEnv
 from models.observation import Observation
 
-PolicyKind = Literal["baseline", "trained", "trained_heuristic"]
+PolicyKind = Literal["baseline", "trained", "trained_heuristic", "trained_checkpoint"]
+
+_JSON_OBJECT_RE = re.compile(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", re.DOTALL)
 
 DIFFICULTIES: tuple[str, ...] = ("easy", "medium", "hard", "nightmare")
 TOOL_ACTIONS = frozenset(
@@ -307,6 +310,103 @@ def choose_policy_action(
     return _fallback_action(obs)
 
 
+def _extract_first_json_action(text: str) -> dict[str, object] | None:
+    """Parse the first JSON object from model text output."""
+    if not text:
+        return None
+    stripped = text.strip()
+    try:
+        payload = json.loads(stripped)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+
+    for match in _JSON_OBJECT_RE.finditer(text):
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def _build_model_prompt(obs: Observation) -> str:
+    """Build inference prompt for checkpoint policy action generation."""
+    parts = [
+        "Return exactly ONE compact JSON object and nothing else.",
+        "Pick action_type only from available_actions.",
+        "Include all required fields for that action.",
+        f"incident={obs.incident_id}",
+        f"title={obs.incident_title}",
+        f"phase={obs.incident_phase}",
+        f"step={obs.current_step}/{obs.max_steps}",
+        f"available_actions={obs.available_actions}",
+    ]
+    if obs.system_status:
+        parts.append(f"system_status={json.dumps(obs.system_status, sort_keys=True)}")
+    if obs.tool_results:
+        parts.append(f"tool_results={json.dumps(obs.tool_results, sort_keys=True)}")
+    if obs.known_facts:
+        parts.append(f"known_facts={json.dumps(obs.known_facts, sort_keys=True)}")
+    parts.append('Example: {"action_type":"check_monitoring","service_name":null}')
+    return "\n".join(parts)
+
+
+def _build_checkpoint_selector(
+    *,
+    checkpoint_dir: str,
+    checkpoint_base_model: str,
+) -> Callable[[Observation, PolicyState], dict[str, object]]:
+    """Create a callable policy that generates actions from a trained adapter."""
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint_base_model, use_fast=True)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    quant_cfg = BitsAndBytesConfig(load_in_4bit=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        checkpoint_base_model,
+        device_map="auto",
+        quantization_config=quant_cfg,
+    )
+    model = PeftModel.from_pretrained(model, checkpoint_dir)
+    model.eval()
+
+    def _selector(obs: Observation, state: PolicyState) -> dict[str, object]:
+        prompt = _build_model_prompt(obs)
+        encoded = tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=1536,
+        )
+        device = next(model.parameters()).device
+        encoded = {k: v.to(device) for k, v in encoded.items()}
+        output = model.generate(
+            **encoded,
+            max_new_tokens=96,
+            do_sample=False,
+            temperature=0.0,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+        new_tokens = output[0][encoded["input_ids"].shape[1] :]
+        decoded = tokenizer.decode(new_tokens, skip_special_tokens=True)
+        payload = _extract_first_json_action(decoded)
+        if not isinstance(payload, dict):
+            return choose_policy_action(obs, state, "trained_heuristic")
+        action_type = str(payload.get("action_type", "")).strip()
+        if action_type not in set(obs.available_actions):
+            return choose_policy_action(obs, state, "trained_heuristic")
+        return payload
+
+    return _selector
+
+
 def _episode_skill_scores(
     actions: list[str],
     reward_breakdowns: list[dict[str, float]],
@@ -347,6 +447,7 @@ async def run_episode(
     seed: int,
     difficulty: str,
     policy: PolicyKind,
+    action_selector: Callable[[Observation, PolicyState], dict[str, object]] | None = None,
 ) -> EpisodeReport:
     """Run one deterministic episode and compute per-episode metrics."""
     reset = await env.reset(seed=seed, difficulty=difficulty, mode="incident")
@@ -363,7 +464,10 @@ async def run_episode(
     final_info: dict[str, object] = {}
 
     for _ in range(obs.max_steps):
-        action = choose_policy_action(obs, state, policy)
+        if action_selector is not None:
+            action = action_selector(obs, state)
+        else:
+            action = choose_policy_action(obs, state, policy)
         action_type = str(action["action_type"])
         actions.append(action_type)
 
@@ -517,8 +621,19 @@ async def evaluate_policy_async(
     *,
     policy: PolicyKind,
     episodes_per_difficulty: int,
+    checkpoint_dir: str | None = None,
+    checkpoint_base_model: str = "Qwen/Qwen2.5-3B-Instruct",
 ) -> EvaluationReport:
     """Run evaluation episodes for one policy mode."""
+    action_selector: Callable[[Observation, PolicyState], dict[str, object]] | None = None
+    if policy == "trained_checkpoint":
+        if not checkpoint_dir:
+            raise ValueError("--checkpoint-dir is required for policy=trained_checkpoint")
+        action_selector = _build_checkpoint_selector(
+            checkpoint_dir=checkpoint_dir,
+            checkpoint_base_model=checkpoint_base_model,
+        )
+
     env = CustomerSupportEnv()
     try:
         episodes: list[EpisodeReport] = []
@@ -529,6 +644,7 @@ async def evaluate_policy_async(
                     seed=episode_seed,
                     difficulty=difficulty,
                     policy=policy,
+                    action_selector=action_selector,
                 )
                 episodes.append(report)
         return aggregate_reports(episodes)
@@ -536,12 +652,20 @@ async def evaluate_policy_async(
         await env.close()
 
 
-def evaluate_policy(*, policy: PolicyKind, episodes_per_difficulty: int) -> EvaluationReport:
+def evaluate_policy(
+    *,
+    policy: PolicyKind,
+    episodes_per_difficulty: int,
+    checkpoint_dir: str | None = None,
+    checkpoint_base_model: str = "Qwen/Qwen2.5-3B-Instruct",
+) -> EvaluationReport:
     """Sync wrapper around async policy evaluation."""
     return asyncio.run(
         evaluate_policy_async(
             policy=policy,
             episodes_per_difficulty=episodes_per_difficulty,
+            checkpoint_dir=checkpoint_dir,
+            checkpoint_base_model=checkpoint_base_model,
         )
     )
 
@@ -568,12 +692,7 @@ def plot_reports(
     fig, (ax_norm, ax_raw) = plt.subplots(1, 2, figsize=(12, 4))
 
     ax_norm.plot(baseline.reward_history, label="baseline", marker="o", linewidth=1.5)
-    ax_norm.plot(
-        trained.reward_history,
-        label="trained_heuristic",
-        marker="o",
-        linewidth=1.5,
-    )
+    ax_norm.plot(trained.reward_history, label="trained", marker="o", linewidth=1.5)
     ax_norm.set_title("Normalized Reward (clamped 0..1)")
     ax_norm.set_xlabel("Episode index")
     ax_norm.set_ylabel("Normalized reward")
@@ -583,19 +702,14 @@ def plot_reports(
 
     ax_raw.axhline(0.0, color="#888", linewidth=0.8, linestyle="--")
     ax_raw.plot(baseline.raw_reward_history, label="baseline", marker="o", linewidth=1.5)
-    ax_raw.plot(
-        trained.raw_reward_history,
-        label="trained_heuristic",
-        marker="o",
-        linewidth=1.5,
-    )
+    ax_raw.plot(trained.raw_reward_history, label="trained", marker="o", linewidth=1.5)
     ax_raw.set_title("Raw Cumulative Reward (can be negative)")
     ax_raw.set_xlabel("Episode index")
     ax_raw.set_ylabel("Cumulative reward")
     ax_raw.grid(True, alpha=0.3)
     ax_raw.legend()
 
-    fig.suptitle("EICC Reward History — baseline vs trained_heuristic")
+    fig.suptitle("EICC Reward History — baseline vs trained")
     fig.tight_layout()
     fig.savefig(output_dir / "reward_curves.png", dpi=120)
     plt.close(fig)
@@ -611,11 +725,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Evaluate EICC policies.")
     parser.add_argument(
         "--policy",
-        choices=["baseline", "trained", "trained_heuristic", "compare"],
+        choices=["baseline", "trained", "trained_heuristic", "trained_checkpoint", "compare"],
         default="compare",
         help=(
             "Evaluation mode. `trained`/`trained_heuristic` both run the deterministic "
-            "trained-style heuristic policy (not checkpoint inference)."
+            "trained-style heuristic policy. Use `trained_checkpoint` to evaluate a trained adapter."
         ),
     )
     parser.add_argument(
@@ -633,6 +747,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--plot",
         action="store_true",
         help="Generate reward curve PNG (requires matplotlib).",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        default=None,
+        help="Adapter/checkpoint directory for `--policy trained_checkpoint`.",
+    )
+    parser.add_argument(
+        "--checkpoint-base-model",
+        default="Qwen/Qwen2.5-3B-Instruct",
+        help="Base model to load before applying the adapter.",
+    )
+    parser.add_argument(
+        "--compare-trained-policy",
+        choices=["trained_heuristic", "trained_checkpoint"],
+        default="trained_heuristic",
+        help="Which policy to use as the trained side when --policy compare.",
     )
     return parser
 
@@ -673,13 +803,27 @@ def main() -> None:
         print(json.dumps(asdict(trained), indent=2))
         return
 
+    if args.policy == "trained_checkpoint":
+        trained = evaluate_policy(
+            policy="trained_checkpoint",
+            episodes_per_difficulty=args.episodes_per_difficulty,
+            checkpoint_dir=args.checkpoint_dir,
+            checkpoint_base_model=args.checkpoint_base_model,
+        )
+        _write_report(trained, output_dir / "trained_report.json")
+        print(json.dumps(asdict(trained), indent=2))
+        return
+
     baseline = evaluate_policy(
         policy="baseline",
         episodes_per_difficulty=args.episodes_per_difficulty,
     )
+    trained_policy: PolicyKind = args.compare_trained_policy
     trained = evaluate_policy(
-        policy="trained_heuristic",
+        policy=trained_policy,
         episodes_per_difficulty=args.episodes_per_difficulty,
+        checkpoint_dir=args.checkpoint_dir,
+        checkpoint_base_model=args.checkpoint_base_model,
     )
     trained.behavior_examples = behavior_diffs(baseline, trained)
     _write_report(baseline, output_dir / "baseline_report.json")

@@ -594,10 +594,23 @@ def main() -> None:
         policy="baseline",
         episodes_per_difficulty=args.eval_episodes,
     )
-    trained = evaluate_policy(
-        policy="trained",
-        episodes_per_difficulty=args.eval_episodes,
-    )
+    trained_adapter_dir = output_dir / "trained_adapter"
+    try:
+        trained = evaluate_policy(
+            policy="trained_checkpoint",
+            episodes_per_difficulty=args.eval_episodes,
+            checkpoint_dir=str(trained_adapter_dir),
+            checkpoint_base_model=model_name,
+        )
+    except Exception as exc:
+        print(
+            "[train] checkpoint-based evaluation unavailable; "
+            f"falling back to trained_heuristic policy ({exc})."
+        )
+        trained = evaluate_policy(
+            policy="trained_heuristic",
+            episodes_per_difficulty=args.eval_episodes,
+        )
     trained.behavior_examples = [
         "Agent shifts from direct fixes to monitoring-first triage.",
         "Agent verifies KB-guided actions using service logs before fixing.",
