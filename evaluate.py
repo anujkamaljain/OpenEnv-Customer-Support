@@ -63,6 +63,7 @@ class EpisodeReport:
 
     difficulty: str
     normalized_reward: float
+    raw_reward: float
     sla_compliant: float
     tool_efficiency: float
     root_cause_accuracy: float
@@ -76,6 +77,7 @@ class EvaluationReport:
     """Structured output from evaluate.py — used for demo and blog."""
 
     avg_normalized_reward: float
+    avg_raw_reward: float
     sla_compliance_rate: float
     tool_efficiency: float
     root_cause_accuracy: float
@@ -83,6 +85,7 @@ class EvaluationReport:
     skill_scores: dict[str, float]
     per_difficulty: dict[str, float]
     reward_history: list[float]
+    raw_reward_history: list[float]
     behavior_examples: list[str] = field(default_factory=list)
 
     def print_comparison(self, baseline: "EvaluationReport") -> None:
@@ -94,6 +97,10 @@ class EvaluationReport:
         print(
             f"Normalized Reward:  {baseline.avg_normalized_reward:.3f} -> "
             f"{self.avg_normalized_reward:.3f}  ({mult:.1f}x)"
+        )
+        print(
+            f"Raw Cumulative:     {baseline.avg_raw_reward:+.3f} -> "
+            f"{self.avg_raw_reward:+.3f}"
         )
         print(
             f"SLA Compliance:     {baseline.sla_compliance_rate:.0%} -> "
@@ -131,10 +138,6 @@ class PolicyState:
     has_fetched_logs: bool = False
     has_probed_service: bool = False
     known_service: str = "auth"
-
-
-def _json_action(action: dict[str, object]) -> str:
-    return json.dumps(action, separators=(",", ":"))
 
 
 def _is_trained_policy(policy: PolicyKind) -> bool:
@@ -418,6 +421,7 @@ async def run_episode(
     return EpisodeReport(
         difficulty=difficulty,
         normalized_reward=normalized,
+        raw_reward=cumulative,
         sla_compliant=sla_compliant,
         tool_efficiency=tool_eff,
         root_cause_accuracy=root_cause,
@@ -437,6 +441,7 @@ def aggregate_reports(
         empty_scores = {skill: 0.0 for skill in TRACKED_SKILLS}
         return EvaluationReport(
             avg_normalized_reward=0.0,
+            avg_raw_reward=0.0,
             sla_compliance_rate=0.0,
             tool_efficiency=0.0,
             root_cause_accuracy=0.0,
@@ -444,11 +449,14 @@ def aggregate_reports(
             skill_scores=empty_scores,
             per_difficulty={d: 0.0 for d in DIFFICULTIES},
             reward_history=[],
+            raw_reward_history=[],
             behavior_examples=behavior_examples or [],
         )
 
     reward_history = [episode.normalized_reward for episode in episodes]
+    raw_reward_history = [episode.raw_reward for episode in episodes]
     avg_reward = sum(reward_history) / len(reward_history)
+    avg_raw_reward = sum(raw_reward_history) / len(raw_reward_history)
     sla_rate = sum(episode.sla_compliant for episode in episodes) / len(episodes)
     tool_eff = sum(episode.tool_efficiency for episode in episodes) / len(episodes)
     root_acc = sum(episode.root_cause_accuracy for episode in episodes) / len(episodes)
@@ -471,6 +479,7 @@ def aggregate_reports(
 
     return EvaluationReport(
         avg_normalized_reward=avg_reward,
+        avg_raw_reward=avg_raw_reward,
         sla_compliance_rate=sla_rate,
         tool_efficiency=tool_eff,
         root_cause_accuracy=root_acc,
@@ -478,6 +487,7 @@ def aggregate_reports(
         skill_scores=skill_scores,
         per_difficulty=per_difficulty,
         reward_history=reward_history,
+        raw_reward_history=raw_reward_history,
         behavior_examples=behavior_examples or [],
     )
 
@@ -541,7 +551,12 @@ def plot_reports(
     trained: EvaluationReport,
     output_dir: Path,
 ) -> None:
-    """Plot reward curves if matplotlib is available."""
+    """Plot both normalized and raw reward curves side-by-side.
+
+    The normalized curve is clamped to ``[0, 1]`` for intuitive presentation.
+    The raw curve preserves negative baseline rewards so viewers can see the
+    true gap, not just a floor-clipped comparison.
+    """
     try:
         import matplotlib.pyplot as plt
     except ImportError:
@@ -549,16 +564,38 @@ def plot_reports(
         return
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure(figsize=(8, 4))
-    ax = fig.add_subplot(1, 1, 1)
-    ax.plot(baseline.reward_history, label="baseline", marker="o", linewidth=1.5)
-    ax.plot(trained.reward_history, label="trained_heuristic", marker="o", linewidth=1.5)
-    ax.set_title("Normalized Reward History")
-    ax.set_xlabel("Episode")
-    ax.set_ylabel("Normalized reward")
-    ax.set_ylim(0.0, 1.0)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
+
+    fig, (ax_norm, ax_raw) = plt.subplots(1, 2, figsize=(12, 4))
+
+    ax_norm.plot(baseline.reward_history, label="baseline", marker="o", linewidth=1.5)
+    ax_norm.plot(
+        trained.reward_history,
+        label="trained_heuristic",
+        marker="o",
+        linewidth=1.5,
+    )
+    ax_norm.set_title("Normalized Reward (clamped 0..1)")
+    ax_norm.set_xlabel("Episode index")
+    ax_norm.set_ylabel("Normalized reward")
+    ax_norm.set_ylim(0.0, 1.0)
+    ax_norm.grid(True, alpha=0.3)
+    ax_norm.legend()
+
+    ax_raw.axhline(0.0, color="#888", linewidth=0.8, linestyle="--")
+    ax_raw.plot(baseline.raw_reward_history, label="baseline", marker="o", linewidth=1.5)
+    ax_raw.plot(
+        trained.raw_reward_history,
+        label="trained_heuristic",
+        marker="o",
+        linewidth=1.5,
+    )
+    ax_raw.set_title("Raw Cumulative Reward (can be negative)")
+    ax_raw.set_xlabel("Episode index")
+    ax_raw.set_ylabel("Cumulative reward")
+    ax_raw.grid(True, alpha=0.3)
+    ax_raw.legend()
+
+    fig.suptitle("EICC Reward History — baseline vs trained_heuristic")
     fig.tight_layout()
     fig.savefig(output_dir / "reward_curves.png", dpi=120)
     plt.close(fig)

@@ -16,6 +16,7 @@ import asyncio
 import inspect
 import json
 import random
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -23,6 +24,59 @@ from env.environment import CustomerSupportEnv
 from evaluate import PolicyState, evaluate_policy, plot_reports
 from evaluate import choose_policy_action as eval_choose_policy_action
 from models.observation import Observation
+
+
+KNOWN_ACTION_TYPES: tuple[str, ...] = (
+    "classify",
+    "route",
+    "respond",
+    "escalate",
+    "request_info",
+    "resolve",
+    "check_monitoring",
+    "probe_service",
+    "fetch_logs",
+    "fetch_user_data",
+    "check_billing",
+    "query_kb",
+    "check_policy",
+    "query_incident_history",
+    "follow_runbook_step",
+    "apply_fix",
+    "verify_fix",
+    "rollback_fix",
+    "notify_stakeholders",
+    "write_postmortem",
+    "update_kb",
+)
+
+_JSON_OBJECT_RE = re.compile(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", re.DOTALL)
+
+
+def _extract_first_json_object(text: str) -> dict[str, object] | None:
+    """Return the first valid JSON object found in a completion.
+
+    Tolerates chat prose, code fences, and extra whitespace so noisy model
+    outputs still produce a usable reward signal instead of a degenerate
+    constant penalty.
+    """
+    if not text:
+        return None
+    stripped = text.strip()
+    try:
+        payload = json.loads(stripped)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+    for match in _JSON_OBJECT_RE.finditer(text):
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
 
 
 @dataclass(slots=True)
@@ -59,9 +113,24 @@ def curriculum_difficulty(iteration: int, episode_index: int, episodes: int) -> 
     return "nightmare"
 
 
+_FORMAT_INSTRUCTION = (
+    "You are an incident response agent. "
+    "Respond with exactly ONE compact JSON object and nothing else. "
+    'Example: {"action_type":"check_monitoring","service_name":null}. '
+    "Pick action_type strictly from available_actions below. "
+    "Include the fields that action requires."
+)
+
+
 def build_prompt(obs: Observation) -> str:
-    """Convert incident observation into a deterministic training prompt."""
+    """Convert incident observation into a deterministic training prompt.
+
+    The prompt is structured so a downstream reward function can parse it
+    back (phase, available_actions) and so the model sees an explicit
+    JSON-only instruction with a concrete example.
+    """
     parts = [
+        _FORMAT_INSTRUCTION,
         f"incident={obs.incident_id}",
         f"title={obs.incident_title}",
         f"phase={obs.incident_phase}",
@@ -74,6 +143,7 @@ def build_prompt(obs: Observation) -> str:
         parts.append(f"tool_results={json.dumps(obs.tool_results, sort_keys=True)}")
     if obs.known_facts:
         parts.append(f"known_facts={json.dumps(obs.known_facts, sort_keys=True)}")
+    parts.append("Respond with ONE JSON action object only:")
     return "\n".join(parts)
 
 
@@ -208,6 +278,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--output-dir", default="artifacts/train")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--max-completion-length",
+        type=int,
+        default=128,
+        help="Max new tokens the policy generates per action (kept short for JSON).",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--allow-fallback",
@@ -217,16 +293,22 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_grpo_config(*, GRPOConfig: object, output_dir: Path, k: int) -> object:
+def _build_grpo_config(
+    *,
+    GRPOConfig: object,
+    output_dir: Path,
+    k: int,
+    max_completion_length: int,
+) -> object:
     """Construct GRPOConfig with TRL-version-compatible argument names."""
     params = inspect.signature(GRPOConfig).parameters
     kwargs: dict[str, object] = {
         "output_dir": str(output_dir / "grpo_output"),
         "num_train_epochs": 1,
         "learning_rate": 5e-6,
-        "logging_steps": 10,
+        "logging_steps": 5,
         "save_steps": 100,
-        "warmup_steps": 25,
+        "warmup_steps": 10,
     }
 
     # TRL naming drift across releases.
@@ -236,11 +318,11 @@ def _build_grpo_config(*, GRPOConfig: object, output_dir: Path, k: int) -> objec
         kwargs["num_generation"] = k
 
     if "max_new_tokens" in params:
-        kwargs["max_new_tokens"] = 256
+        kwargs["max_new_tokens"] = max_completion_length
     elif "max_completion_length" in params:
-        kwargs["max_completion_length"] = 256
+        kwargs["max_completion_length"] = max_completion_length
     elif "response_length" in params:
-        kwargs["response_length"] = 256
+        kwargs["response_length"] = max_completion_length
 
     if "per_device_train_batch_size" in params:
         kwargs["per_device_train_batch_size"] = 2
@@ -249,6 +331,12 @@ def _build_grpo_config(*, GRPOConfig: object, output_dir: Path, k: int) -> objec
 
     if "gradient_accumulation_steps" in params:
         kwargs["gradient_accumulation_steps"] = 4
+
+    # Encourage diverse generations so GRPO gets meaningful reward variance.
+    if "temperature" in params:
+        kwargs["temperature"] = 0.8
+    if "top_p" in params:
+        kwargs["top_p"] = 0.95
 
     return GRPOConfig(**kwargs)
 
@@ -283,8 +371,23 @@ def main() -> None:
         for row in trajectories
     ]
     dataset = Dataset.from_list(dataset_rows)
-    reward_lookup = {
-        (row.prompt, row.completion): row.reward for row in trajectories
+    # Action-keyed lookup: the environment reward recorded when this
+    # action_type was executed from this prompt during trajectory collection.
+    # Much more forgiving than full (prompt, completion) string match.
+    action_reward_lookup: dict[tuple[str, str], list[float]] = {}
+    for row in trajectories:
+        try:
+            recorded_action = json.loads(row.completion)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(recorded_action, dict):
+            continue
+        action_type = str(recorded_action.get("action_type", "")).strip()
+        if not action_type:
+            continue
+        action_reward_lookup.setdefault((row.prompt, action_type), []).append(row.reward)
+    trajectory_action_reward: dict[tuple[str, str], float] = {
+        key: sum(values) / len(values) for key, values in action_reward_lookup.items()
     }
 
     model_name = "Qwen/Qwen2.5-3B-Instruct"
@@ -333,49 +436,62 @@ def main() -> None:
         )
         model = get_peft_model(model, peft_cfg)
 
+    preferred_actions: dict[str, set[str]] = {
+        "triage": {"check_monitoring", "query_kb", "classify"},
+        "investigation": {"check_monitoring", "probe_service", "fetch_logs", "query_kb"},
+        "response": {"check_policy", "apply_fix", "notify_stakeholders", "respond"},
+        "resolution": {"verify_fix", "write_postmortem", "update_kb", "resolve"},
+    }
+    required_fields: dict[str, tuple[str, ...]] = {
+        "classify": ("category", "priority"),
+        "probe_service": ("service_name", "check_type"),
+        "fetch_logs": ("service_name", "time_range"),
+        "respond": ("response_text", "tone"),
+        "apply_fix": ("service_name", "fix_type"),
+        "resolve": ("resolution_summary",),
+        "notify_stakeholders": ("stakeholder", "urgency"),
+        "write_postmortem": ("summary", "root_cause_description"),
+        "update_kb": ("article_title", "content"),
+    }
+
+    reward_stats = {"total": 0, "valid_json": 0, "valid_action": 0, "available": 0}
+
+    def _prompt_field(prompt: str, key: str) -> str:
+        prefix = f"{key}="
+        for line in prompt.splitlines():
+            if line.startswith(prefix):
+                return line[len(prefix) :].strip()
+        return ""
+
+    def _mentions_known_action(text: str) -> bool:
+        for action_name in KNOWN_ACTION_TYPES:
+            if f'"{action_name}"' in text or f"'{action_name}'" in text:
+                return True
+        return False
+
     def reward_function(
         prompts: list[str],
         completions: list[str],
         **_: object,
     ) -> list[float]:
-        preferred_actions: dict[str, set[str]] = {
-            "triage": {"check_monitoring", "query_kb", "classify"},
-            "investigation": {"check_monitoring", "probe_service", "fetch_logs", "query_kb"},
-            "response": {"check_policy", "apply_fix", "notify_stakeholders", "respond"},
-            "resolution": {"verify_fix", "write_postmortem", "update_kb", "resolve"},
-        }
-        required_fields: dict[str, tuple[str, ...]] = {
-            "classify": ("category", "priority"),
-            "probe_service": ("service_name", "check_type"),
-            "fetch_logs": ("service_name", "time_range"),
-            "respond": ("response_text", "tone"),
-            "apply_fix": ("service_name", "fix_type"),
-            "resolve": ("resolution_summary",),
-        }
-
-        def _prompt_field(prompt: str, key: str) -> str:
-            prefix = f"{key}="
-            for line in prompt.splitlines():
-                if line.startswith(prefix):
-                    return line[len(prefix) :].strip()
-            return ""
-
         rewards: list[float] = []
         for prompt, completion in zip(prompts, completions):
-            score = -0.02  # Small base penalty encourages useful/valid actions.
-            try:
-                action_payload = json.loads(completion)
-            except json.JSONDecodeError:
-                rewards.append(-0.1)
-                continue
-            if not isinstance(action_payload, dict):
-                rewards.append(-0.1)
+            reward_stats["total"] += 1
+
+            action_payload = _extract_first_json_object(completion)
+            if action_payload is None:
+                # Partial credit for effort even without valid JSON so GRPO
+                # always sees some variance instead of a constant floor.
+                rewards.append(-0.02 if _mentions_known_action(completion) else -0.08)
                 continue
 
+            reward_stats["valid_json"] += 1
             action_type = str(action_payload.get("action_type", "")).strip()
             if not action_type:
-                rewards.append(-0.1)
+                rewards.append(-0.04)
                 continue
+
+            reward_stats["valid_action"] += 1
 
             available_actions_raw = _prompt_field(prompt, "available_actions")
             available_actions: set[str] = set()
@@ -388,28 +504,63 @@ def main() -> None:
                     available_actions = set()
 
             phase = _prompt_field(prompt, "phase")
+
+            # Base signal for a structurally valid JSON action.
+            score = 0.05
+
+            if action_type in KNOWN_ACTION_TYPES:
+                score += 0.04
+
             if action_type in available_actions:
-                score += 0.08
+                score += 0.12
+                reward_stats["available"] += 1
             else:
-                score -= 0.06
+                score -= 0.04
 
             if action_type in preferred_actions.get(phase, set()):
-                score += 0.05
+                score += 0.06
 
             needed = required_fields.get(action_type, ())
             if needed:
-                has_all_fields = all(action_payload.get(field) not in (None, "") for field in needed)
-                score += 0.03 if has_all_fields else -0.03
+                present = sum(
+                    1 for field_name in needed if action_payload.get(field_name) not in (None, "")
+                )
+                score += 0.06 * (present / max(1, len(needed)))
 
-            # Preserve supervised signal when completion matches recorded trajectory exactly.
-            score += 0.4 * float(reward_lookup.get((prompt, completion), 0.0))
+            trajectory_reward = trajectory_action_reward.get((prompt, action_type), 0.0)
+            score += 0.4 * float(trajectory_reward)
+
+            # Penalize noisy / long outputs, reward concise JSON.
+            completion_len = len(completion)
+            if completion_len <= 160:
+                score += 0.01
+            elif completion_len > 400:
+                score -= 0.03
+
             rewards.append(max(-1.0, min(1.0, score)))
+
+        # Periodic parse-rate diagnostics so judges/you see training health.
+        batch_count = reward_function.__dict__.setdefault("_call_count", 0) + 1
+        reward_function.__dict__["_call_count"] = batch_count
+        if batch_count % 10 == 0 or batch_count == 1:
+            total = max(1, reward_stats["total"])
+            print(
+                "[reward] batch={} total={} valid_json={:.0%} valid_action={:.0%} "
+                "available={:.0%}".format(
+                    batch_count,
+                    reward_stats["total"],
+                    reward_stats["valid_json"] / total,
+                    reward_stats["valid_action"] / total,
+                    reward_stats["available"] / total,
+                )
+            )
         return rewards
 
     config = _build_grpo_config(
         GRPOConfig=GRPOConfig,
         output_dir=output_dir,
         k=args.k,
+        max_completion_length=args.max_completion_length,
     )
     trainer_params = inspect.signature(GRPOTrainer).parameters
     trainer_kwargs: dict[str, object] = {"model": model}
