@@ -26,7 +26,7 @@ from typing import Literal
 from env.environment import CustomerSupportEnv
 from models.observation import Observation
 
-PolicyKind = Literal["baseline", "trained"]
+PolicyKind = Literal["baseline", "trained", "trained_heuristic"]
 
 DIFFICULTIES: tuple[str, ...] = ("easy", "medium", "hard", "nightmare")
 TOOL_ACTIONS = frozenset(
@@ -137,6 +137,10 @@ def _json_action(action: dict[str, object]) -> str:
     return json.dumps(action, separators=(",", ":"))
 
 
+def _is_trained_policy(policy: PolicyKind) -> bool:
+    return policy in ("trained", "trained_heuristic")
+
+
 def _priority_from_max_steps(max_steps: int) -> str:
     if max_steps >= 80:
         return "critical"
@@ -186,9 +190,10 @@ def choose_policy_action(
     state: PolicyState,
     policy: PolicyKind,
 ) -> dict[str, object]:
-    """Deterministic policy used for baseline/trained evaluations."""
+    """Deterministic heuristic policy used for baseline/trained-style evaluations."""
     available = set(obs.available_actions)
     phase = obs.incident_phase or "investigation"
+    trained_mode = _is_trained_policy(policy)
     customer_id = _default_customer_id(obs)
     state.known_service = _pick_impacted_service(obs, state.known_service)
 
@@ -196,7 +201,7 @@ def choose_policy_action(
         if "check_monitoring" in available and not state.has_checked_monitoring:
             state.has_checked_monitoring = True
             return {"action_type": "check_monitoring", "service_name": None}
-        if "query_kb" in available and not state.has_queried_kb and policy == "trained":
+        if "query_kb" in available and not state.has_queried_kb and trained_mode:
             state.has_queried_kb = True
             return {"action_type": "query_kb", "query": "payment 500 errors"}
         if "classify" in available:
@@ -216,7 +221,7 @@ def choose_policy_action(
         if "query_kb" in available and not state.has_queried_kb:
             state.has_queried_kb = True
             return {"action_type": "query_kb", "query": "payment outage"}
-        if policy == "trained" and "fetch_logs" in available and not state.has_fetched_logs:
+        if trained_mode and "fetch_logs" in available and not state.has_fetched_logs:
             state.has_fetched_logs = True
             return {
                 "action_type": "fetch_logs",
@@ -237,10 +242,10 @@ def choose_policy_action(
             return {"action_type": "fetch_user_data", "customer_id": customer_id}
 
     if phase == "response":
-        if policy == "trained" and "check_policy" in available and not state.has_checked_policy:
+        if trained_mode and "check_policy" in available and not state.has_checked_policy:
             state.has_checked_policy = True
             return {"action_type": "check_policy", "policy_type": "compensation"}
-        if "notify_stakeholders" in available and not state.has_notified and policy == "trained":
+        if "notify_stakeholders" in available and not state.has_notified and trained_mode:
             state.has_notified = True
             return {
                 "action_type": "notify_stakeholders",
@@ -268,7 +273,7 @@ def choose_policy_action(
         if "verify_fix" in available and not state.has_verified_fix:
             state.has_verified_fix = True
             return {"action_type": "verify_fix", "service_name": state.known_service}
-        if "write_postmortem" in available and policy == "trained":
+        if "write_postmortem" in available and trained_mode:
             return {
                 "action_type": "write_postmortem",
                 "summary": "Incident resolved after service remediation and verification.",
@@ -276,7 +281,7 @@ def choose_policy_action(
                 "remediation_steps": ["checked monitoring", "applied fix", "verified recovery"],
                 "prevention_measures": ["refresh runbook", "add targeted alert"],
             }
-        if "update_kb" in available and policy == "trained":
+        if "update_kb" in available and trained_mode:
             return {
                 "action_type": "update_kb",
                 "article_title": "Payment outage triage",
@@ -547,7 +552,7 @@ def plot_reports(
     fig = plt.figure(figsize=(8, 4))
     ax = fig.add_subplot(1, 1, 1)
     ax.plot(baseline.reward_history, label="baseline", marker="o", linewidth=1.5)
-    ax.plot(trained.reward_history, label="trained", marker="o", linewidth=1.5)
+    ax.plot(trained.reward_history, label="trained_heuristic", marker="o", linewidth=1.5)
     ax.set_title("Normalized Reward History")
     ax.set_xlabel("Episode")
     ax.set_ylabel("Normalized reward")
@@ -569,9 +574,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Evaluate EICC policies.")
     parser.add_argument(
         "--policy",
-        choices=["baseline", "trained", "compare"],
+        choices=["baseline", "trained", "trained_heuristic", "compare"],
         default="compare",
-        help="Evaluation mode.",
+        help=(
+            "Evaluation mode. `trained`/`trained_heuristic` both run the deterministic "
+            "trained-style heuristic policy (not checkpoint inference)."
+        ),
     )
     parser.add_argument(
         "--episodes-per-difficulty",
@@ -607,8 +615,21 @@ def main() -> None:
         return
 
     if args.policy == "trained":
+        print(
+            "[evaluate] `--policy trained` currently maps to the deterministic "
+            "`trained_heuristic` policy."
+        )
         trained = evaluate_policy(
-            policy="trained",
+            policy="trained_heuristic",
+            episodes_per_difficulty=args.episodes_per_difficulty,
+        )
+        _write_report(trained, output_dir / "trained_report.json")
+        print(json.dumps(asdict(trained), indent=2))
+        return
+
+    if args.policy == "trained_heuristic":
+        trained = evaluate_policy(
+            policy="trained_heuristic",
             episodes_per_difficulty=args.episodes_per_difficulty,
         )
         _write_report(trained, output_dir / "trained_report.json")
@@ -620,7 +641,7 @@ def main() -> None:
         episodes_per_difficulty=args.episodes_per_difficulty,
     )
     trained = evaluate_policy(
-        policy="trained",
+        policy="trained_heuristic",
         episodes_per_difficulty=args.episodes_per_difficulty,
     )
     trained.behavior_examples = behavior_diffs(baseline, trained)

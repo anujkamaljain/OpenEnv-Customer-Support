@@ -1,0 +1,38 @@
+{
+  "avg_normalized_reward": 0.0,
+  "sla_compliance_rate": 0.0,
+  "tool_efficiency": 1.0,
+  "root_cause_accuracy": 0.0,
+  "long_horizon_consistency": 0.0,
+  "skill_scores": {
+    "investigation_before_action": 1.0,
+    "kb_cross_verification": 1.0,
+    "policy_checking": 0.0,
+    "stakeholder_proactivity": 0.0,
+    "root_cause_accuracy": 0.0,
+    "tone_matching": 0.0,
+    "resource_efficiency": 1.0,
+    "red_herring_dismissal": 0.0
+  },
+  "per_difficulty": {
+    "easy": 0.0,
+    "medium": 0.0,
+    "hard": 0.0,
+    "nightmare": 0.0
+  },
+  "reward_history": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "behavior_examples": []
+}

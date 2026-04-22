@@ -99,6 +99,8 @@ python evaluate.py --policy compare --episodes-per-difficulty 5 --plot
 ```
 
 The compare mode emits baseline vs trained reports and structured behavior diffs.
+Current `compare` mode evaluates `baseline` vs `trained_heuristic` policy logic.
+For final judging, pair this with a checkpoint-inference evaluation run from the trained adapter.
 
 ## Updated Baseline Results Table
 
@@ -160,6 +162,20 @@ without a shared external state backend can cause reset/step session drift.
 - Incident walkthrough: `demo/incident_resolution_walkthrough.md`
 - Architecture diagram: `demo/architecture_diagram.md`
 - 2-minute video script: `demo/video_script_2min.md`
+- Mini-blog draft: `demo/hf_mini_blog.md`
+- Reproducible eval snapshot: `demo/results/baseline_report.json`, `demo/results/trained_report.json`, `demo/results/reward_curves.png`
+
+## Hackathon Submission Checklist
+
+- [x] OpenEnv-based environment with manifest: `openenv.yaml`
+- [x] Training script + Colab notebook using TRL/Unsloth: `train.py`, `train_notebook.ipynb`
+- [x] Hugging Face Space deployment link in README
+- [x] README includes problem, environment design, pipeline, and API usage
+- [x] Evaluation pipeline emits baseline/trained-style reports and reward curves
+- [ ] Publish a Hugging Face mini-blog (<2 min read) and add URL here
+- [ ] Publish a <2 min YouTube demo and add URL here
+
+Before submission, replace unchecked entries with live URLs so judges can verify artifacts quickly.
 
 ## Repository Layout (high-level)
 

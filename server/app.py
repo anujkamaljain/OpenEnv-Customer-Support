@@ -201,8 +201,11 @@ class StepRequest(BaseModel):
 
     action: Action = Field(
         description=(
-            "Discriminated union on `action_type`: classify, route, respond, escalate, "
-            "request_info, resolve. Wrong shape → **422**; wrong phase → **200** with a penalty in `reward`."
+            "Discriminated union on `action_type`: classify, route, respond, escalate, request_info, "
+            "resolve, check_monitoring, probe_service, fetch_logs, fetch_user_data, check_billing, "
+            "query_kb, check_policy, query_incident_history, follow_runbook_step, apply_fix, verify_fix, "
+            "rollback_fix, notify_stakeholders, write_postmortem, update_kb. "
+            "Wrong shape -> **422**; wrong phase -> **200** with a penalty in `reward`."
         ),
     )
     session_id: str | None = Field(

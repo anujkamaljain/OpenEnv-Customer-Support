@@ -24,7 +24,7 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -q
 
-      - name: API smoke (/reset /state /step)
+      - name: API smoke (/reset /state /step /close)
         run: |
           python - <<'PY'
           from fastapi.testclient import TestClient
@@ -42,5 +42,8 @@ jobs:
 
           step = client.post("/step", headers=headers, json={"action": {"action_type": "check_monitoring"}})
           assert step.status_code == 200, step.text
+
+          close = client.post("/close", headers=headers)
+          assert close.status_code == 200, close.text
           print("smoke-ok")
           PY

@@ -1,0 +1,42 @@
+{
+  "avg_normalized_reward": 0.383425925925926,
+  "sla_compliance_rate": 0.0,
+  "tool_efficiency": 1.0,
+  "root_cause_accuracy": 0.4166666666666667,
+  "long_horizon_consistency": 0.4072138732858707,
+  "skill_scores": {
+    "investigation_before_action": 1.0,
+    "kb_cross_verification": 1.0,
+    "policy_checking": 1.0,
+    "stakeholder_proactivity": 1.0,
+    "root_cause_accuracy": 0.4166666666666667,
+    "tone_matching": 0.5833333333333334,
+    "resource_efficiency": 1.0,
+    "red_herring_dismissal": 0.4166666666666667
+  },
+  "per_difficulty": {
+    "easy": 0.5833333333333334,
+    "medium": 0.35000000000000003,
+    "hard": 0.3244444444444445,
+    "nightmare": 0.27592592592592596
+  },
+  "reward_history": [
+    0.19,
+    0.78,
+    0.78,
+    0.7333333333333334,
+    0.15833333333333335,
+    0.15833333333333335,
+    0.12666666666666668,
+    0.12666666666666668,
+    0.7200000000000001,
+    0.6166666666666667,
+    0.10555555555555556,
+    0.10555555555555556
+  ],
+  "behavior_examples": [
+    "Investigation strategy: check_monitoring-before-fix 100% -> 100%.",
+    "KB trust vs verification: kb_cross_verification 100% -> 100%.",
+    "Long-horizon execution: consistency 0.00 -> 0.41."
+  ]
+}

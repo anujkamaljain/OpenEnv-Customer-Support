@@ -10,9 +10,11 @@ Usage:
 
 from __future__ import annotations
 
+import ast
 import argparse
 import asyncio
 import json
+import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -178,6 +180,25 @@ def write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _seed_everything(seed: int) -> None:
+    """Seed common RNGs for reproducible trajectory collection and training."""
+    random.seed(seed)
+    try:
+        import numpy as np
+
+        np.random.seed(seed)
+    except ImportError:
+        pass
+    try:
+        import torch
+
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except ImportError:
+        pass
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train EICC policy with GRPO.")
     parser.add_argument("--iterations", type=int, default=20)
@@ -185,6 +206,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--k", type=int, default=4, help="GRPO num_generations")
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--output-dir", default="artifacts/train")
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--allow-fallback",
@@ -198,6 +220,7 @@ def main() -> None:
     """Run trajectory collection, optional GRPO training, and evaluation."""
     args = _build_parser().parse_args()
     output_dir = Path(args.output_dir)
+    _seed_everything(args.seed)
 
     trajectories, reward_history = asyncio.run(
         collect_trajectories(iterations=args.iterations, episodes=args.episodes)
@@ -278,9 +301,72 @@ def main() -> None:
         completions: list[str],
         **_: object,
     ) -> list[float]:
+        preferred_actions: dict[str, set[str]] = {
+            "triage": {"check_monitoring", "query_kb", "classify"},
+            "investigation": {"check_monitoring", "probe_service", "fetch_logs", "query_kb"},
+            "response": {"check_policy", "apply_fix", "notify_stakeholders", "respond"},
+            "resolution": {"verify_fix", "write_postmortem", "update_kb", "resolve"},
+        }
+        required_fields: dict[str, tuple[str, ...]] = {
+            "classify": ("category", "priority"),
+            "probe_service": ("service_name", "check_type"),
+            "fetch_logs": ("service_name", "time_range"),
+            "respond": ("response_text", "tone"),
+            "apply_fix": ("service_name", "fix_type"),
+            "resolve": ("resolution_summary",),
+        }
+
+        def _prompt_field(prompt: str, key: str) -> str:
+            prefix = f"{key}="
+            for line in prompt.splitlines():
+                if line.startswith(prefix):
+                    return line[len(prefix) :].strip()
+            return ""
+
         rewards: list[float] = []
         for prompt, completion in zip(prompts, completions):
-            rewards.append(float(reward_lookup.get((prompt, completion), 0.0)))
+            score = -0.02  # Small base penalty encourages useful/valid actions.
+            try:
+                action_payload = json.loads(completion)
+            except json.JSONDecodeError:
+                rewards.append(-0.1)
+                continue
+            if not isinstance(action_payload, dict):
+                rewards.append(-0.1)
+                continue
+
+            action_type = str(action_payload.get("action_type", "")).strip()
+            if not action_type:
+                rewards.append(-0.1)
+                continue
+
+            available_actions_raw = _prompt_field(prompt, "available_actions")
+            available_actions: set[str] = set()
+            if available_actions_raw:
+                try:
+                    parsed_available = ast.literal_eval(available_actions_raw)
+                    if isinstance(parsed_available, list):
+                        available_actions = {str(item) for item in parsed_available}
+                except (ValueError, SyntaxError):
+                    available_actions = set()
+
+            phase = _prompt_field(prompt, "phase")
+            if action_type in available_actions:
+                score += 0.08
+            else:
+                score -= 0.06
+
+            if action_type in preferred_actions.get(phase, set()):
+                score += 0.05
+
+            needed = required_fields.get(action_type, ())
+            if needed:
+                has_all_fields = all(action_payload.get(field) not in (None, "") for field in needed)
+                score += 0.03 if has_all_fields else -0.03
+
+            # Preserve supervised signal when completion matches recorded trajectory exactly.
+            score += 0.4 * float(reward_lookup.get((prompt, completion), 0.0))
+            rewards.append(max(-1.0, min(1.0, score)))
         return rewards
 
     config = GRPOConfig(

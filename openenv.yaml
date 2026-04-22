@@ -29,6 +29,7 @@ interface:
   reset: POST /reset
   step: POST /step
   state: GET /state
+  close: POST /close
 
 requirements:
   deterministic: true
