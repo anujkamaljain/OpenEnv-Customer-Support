@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import argparse
 import asyncio
+import inspect
 import json
 import random
 from dataclasses import asdict, dataclass
@@ -150,16 +151,6 @@ async def collect_trajectories(
 def require_training_stack(*, allow_fallback: bool) -> tuple[object, object, object, object | None]:
     """Import training libraries, requiring Unsloth unless fallback is allowed."""
     try:
-        from datasets import Dataset
-        from trl import GRPOConfig, GRPOTrainer
-    except ImportError as exc:
-        raise RuntimeError(
-            "Missing training dependencies. Install in Colab with:\n"
-            'pip install "trl>=0.15" datasets peft bitsandbytes '
-            "llm-blender accelerate transformers"
-        ) from exc
-
-    try:
         from unsloth import FastLanguageModel
     except ImportError as exc:
         if not allow_fallback:
@@ -170,6 +161,16 @@ def require_training_stack(*, allow_fallback: bool) -> tuple[object, object, obj
             ) from exc
         FastLanguageModel = None
         print("[train] unsloth not found; using transformers+peft fallback.")
+
+    try:
+        from datasets import Dataset
+        from trl import GRPOConfig, GRPOTrainer
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing training dependencies. Install in Colab with:\n"
+            'pip install "trl>=0.15" datasets peft bitsandbytes '
+            "llm-blender accelerate transformers"
+        ) from exc
 
     return Dataset, GRPOConfig, GRPOTrainer, FastLanguageModel
 
@@ -214,6 +215,42 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Allow transformers+peft fallback when Unsloth is unavailable.",
     )
     return parser
+
+
+def _build_grpo_config(*, GRPOConfig: object, output_dir: Path, k: int) -> object:
+    """Construct GRPOConfig with TRL-version-compatible argument names."""
+    params = inspect.signature(GRPOConfig).parameters
+    kwargs: dict[str, object] = {
+        "output_dir": str(output_dir / "grpo_output"),
+        "num_train_epochs": 1,
+        "learning_rate": 5e-6,
+        "logging_steps": 10,
+        "save_steps": 100,
+        "warmup_steps": 25,
+    }
+
+    # TRL naming drift across releases.
+    if "num_generations" in params:
+        kwargs["num_generations"] = k
+    elif "num_generation" in params:
+        kwargs["num_generation"] = k
+
+    if "max_new_tokens" in params:
+        kwargs["max_new_tokens"] = 256
+    elif "max_completion_length" in params:
+        kwargs["max_completion_length"] = 256
+    elif "response_length" in params:
+        kwargs["response_length"] = 256
+
+    if "per_device_train_batch_size" in params:
+        kwargs["per_device_train_batch_size"] = 2
+    elif "train_batch_size" in params:
+        kwargs["train_batch_size"] = 2
+
+    if "gradient_accumulation_steps" in params:
+        kwargs["gradient_accumulation_steps"] = 4
+
+    return GRPOConfig(**kwargs)
 
 
 def main() -> None:
@@ -369,25 +406,23 @@ def main() -> None:
             rewards.append(max(-1.0, min(1.0, score)))
         return rewards
 
-    config = GRPOConfig(
-        output_dir=str(output_dir / "grpo_output"),
-        num_generations=args.k,
-        max_new_tokens=256,
-        num_train_epochs=1,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=4,
-        learning_rate=5e-6,
-        logging_steps=10,
-        save_steps=100,
-        warmup_steps=25,
+    config = _build_grpo_config(
+        GRPOConfig=GRPOConfig,
+        output_dir=output_dir,
+        k=args.k,
     )
-    trainer = GRPOTrainer(
-        model=model,
-        reward_funcs=[reward_function],
-        config=config,
-        train_dataset=dataset,
-        tokenizer=tokenizer,
-    )
+    trainer_params = inspect.signature(GRPOTrainer).parameters
+    trainer_kwargs: dict[str, object] = {
+        "model": model,
+        "reward_funcs": [reward_function],
+        "config": config,
+        "train_dataset": dataset,
+    }
+    if "tokenizer" in trainer_params:
+        trainer_kwargs["tokenizer"] = tokenizer
+    elif "processing_class" in trainer_params:
+        trainer_kwargs["processing_class"] = tokenizer
+    trainer = GRPOTrainer(**trainer_kwargs)
     trainer.train()
     trainer.save_model(str(output_dir / "trained_adapter"))
 
