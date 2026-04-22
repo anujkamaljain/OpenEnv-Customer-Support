@@ -8,4 +8,3 @@ __pycache__/
 venv/
 artifacts/
 *.log
-VM_SANDBOX_IMPLEMENTATION_PRIVATE.md
