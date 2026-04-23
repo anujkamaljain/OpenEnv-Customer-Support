@@ -17,6 +17,8 @@ import inspect
 import json
 import random
 import re
+import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -259,6 +261,45 @@ def write_json(path: Path, payload: object) -> None:
     """Write JSON artifact with stable UTF-8 formatting."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _run_checkpoint_eval_subprocess(
+    *,
+    episodes_per_difficulty: int,
+    checkpoint_dir: Path,
+    checkpoint_base_model: str,
+    output_dir: Path,
+) -> object:
+    """Run trained-checkpoint evaluation in a clean process.
+
+    Unsloth patches model internals when imported during training. Running
+    checkpoint eval in a fresh Python process avoids cross-library monkey-patch
+    conflicts (for example, Qwen attention apply_qkv attribute errors).
+    """
+    eval_output_dir = output_dir / "checkpoint_eval"
+    eval_cmd = [
+        sys.executable,
+        str(Path(__file__).with_name("evaluate.py")),
+        "--policy",
+        "trained_checkpoint",
+        "--episodes-per-difficulty",
+        str(episodes_per_difficulty),
+        "--checkpoint-dir",
+        str(checkpoint_dir),
+        "--checkpoint-base-model",
+        checkpoint_base_model,
+        "--output-dir",
+        str(eval_output_dir),
+    ]
+    subprocess.run(eval_cmd, check=True)
+    report_path = eval_output_dir / "trained_report.json"
+    if not report_path.exists():
+        raise FileNotFoundError(f"Missing checkpoint evaluation report: {report_path}")
+
+    from evaluate import EvaluationReport
+
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    return EvaluationReport(**payload)
 
 
 def _seed_everything(seed: int) -> None:
@@ -507,15 +548,15 @@ def main() -> None:
         if action_payload is None:
             if not _looks_terminated_json(completion):
                 reward_stats["unterminated"] += 1
-                return -0.25
-            if _mentions_known_action(completion):
                 return -0.15
-            return -0.10
+            if _mentions_known_action(completion):
+                return -0.08
+            return -0.06
 
         reward_stats["valid_json"] += 1
         action_type = str(action_payload.get("action_type", "")).strip()
         if not action_type:
-            return -0.04
+            return -0.02
 
         reward_stats["valid_action"] += 1
 
@@ -531,28 +572,28 @@ def main() -> None:
 
         phase = _prompt_field(prompt, "phase")
 
-        score = 0.05
+        score = 0.12
         if action_type in KNOWN_ACTION_TYPES:
-            score += 0.04
+            score += 0.08
 
         if action_type in available_actions:
-            score += 0.12
+            score += 0.24
             reward_stats["available"] += 1
         else:
-            score -= 0.04
+            score -= 0.02
 
         if action_type in preferred_actions.get(phase, set()):
-            score += 0.06
+            score += 0.10
 
         needed = required_fields.get(action_type, ())
         if needed:
             present = sum(
                 1 for field_name in needed if action_payload.get(field_name) not in (None, "")
             )
-            score += 0.06 * (present / max(1, len(needed)))
+            score += 0.12 * (present / max(1, len(needed)))
 
         trajectory_reward = trajectory_action_reward.get((prompt, action_type), 0.0)
-        score += 0.4 * float(trajectory_reward)
+        score += 0.25 * float(trajectory_reward)
 
         # Strongly prefer exactly one JSON object and no trailing/leading prose.
         matches = _extract_json_object_matches(completion)
@@ -560,24 +601,24 @@ def main() -> None:
             first = matches[0]
             if len(matches) > 1:
                 reward_stats["multi_json"] += 1
-                score -= 0.22
+                score -= 0.08
             prefix = completion[: first.start()].strip()
             suffix = completion[first.end() :].strip()
             if prefix or suffix:
                 reward_stats["extra_text"] += 1
-                score -= 0.18
+                score -= 0.06
 
         completion_len = len(completion)
         cap_threshold = max(16, int(args.max_completion_length * 0.95))
         if completion_len >= cap_threshold:
             reward_stats["cap_hit"] += 1
-            score -= 0.20
+            score -= 0.06
         if completion_len <= 120:
-            score += 0.01
+            score += 0.03
         elif completion_len > 400:
-            score -= 0.40
+            score -= 0.15
         elif completion_len > 240:
-            score -= 0.20
+            score -= 0.08
         elif completion_len > 160:
             score -= 0.03
 
@@ -694,11 +735,11 @@ def main() -> None:
     )
     trained_adapter_dir = output_dir / "trained_adapter"
     try:
-        trained = evaluate_policy(
-            policy="trained_checkpoint",
+        trained = _run_checkpoint_eval_subprocess(
             episodes_per_difficulty=args.eval_episodes,
-            checkpoint_dir=str(trained_adapter_dir),
+            checkpoint_dir=trained_adapter_dir,
             checkpoint_base_model=model_name,
+            output_dir=output_dir,
         )
     except Exception as exc:
         print(

@@ -59,6 +59,18 @@ TRACKED_SKILLS: tuple[str, ...] = (
     "red_herring_dismissal",
 )
 
+REQUIRED_FIELDS_BY_ACTION: dict[str, tuple[str, ...]] = {
+    "classify": ("category", "priority"),
+    "probe_service": ("service_name", "check_type"),
+    "fetch_logs": ("service_name", "time_range"),
+    "respond": ("response_text", "tone"),
+    "apply_fix": ("service_name", "fix_type"),
+    "resolve": ("resolution_summary",),
+    "notify_stakeholders": ("stakeholder", "urgency"),
+    "write_postmortem": ("summary", "root_cause_description"),
+    "update_kb": ("article_title", "content"),
+}
+
 
 @dataclass(slots=True)
 class EpisodeReport:
@@ -356,6 +368,40 @@ def _build_model_prompt(obs: Observation) -> str:
     return "\n".join(parts)
 
 
+def _sanitize_checkpoint_action(
+    *,
+    obs: Observation,
+    state: PolicyState,
+    payload: dict[str, object] | None,
+) -> dict[str, object]:
+    """Return a safe action for env.step, falling back to heuristic when needed."""
+    fallback = choose_policy_action(obs, state, "trained_heuristic")
+    if not isinstance(payload, dict):
+        return fallback
+
+    action_type = str(payload.get("action_type", "")).strip()
+    available = set(obs.available_actions)
+    if not action_type or action_type not in available:
+        return fallback
+
+    # Keep only JSON-safe, env-serializable values.
+    candidate: dict[str, object] = {"action_type": action_type}
+    for key, value in payload.items():
+        if key == "action_type":
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            candidate[str(key)] = value
+        elif isinstance(value, list):
+            candidate[str(key)] = value
+
+    required_fields = REQUIRED_FIELDS_BY_ACTION.get(action_type, ())
+    for field_name in required_fields:
+        if candidate.get(field_name) in (None, ""):
+            return fallback
+
+    return candidate
+
+
 def _build_checkpoint_selector(
     *,
     checkpoint_dir: str,
@@ -399,12 +445,7 @@ def _build_checkpoint_selector(
         new_tokens = output[0][encoded["input_ids"].shape[1] :]
         decoded = tokenizer.decode(new_tokens, skip_special_tokens=True)
         payload = _extract_first_json_action(decoded)
-        if not isinstance(payload, dict):
-            return choose_policy_action(obs, state, "trained_heuristic")
-        action_type = str(payload.get("action_type", "")).strip()
-        if action_type not in set(obs.available_actions):
-            return choose_policy_action(obs, state, "trained_heuristic")
-        return payload
+        return _sanitize_checkpoint_action(obs=obs, state=state, payload=payload)
 
     return _selector
 
