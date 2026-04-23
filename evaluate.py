@@ -90,6 +90,8 @@ class EvaluationReport:
     reward_history: list[float]
     raw_reward_history: list[float]
     behavior_examples: list[str] = field(default_factory=list)
+    policy_used: str = "unknown"
+    episodes_per_difficulty: int = 0
 
     def print_comparison(self, baseline: "EvaluationReport") -> None:
         """Pretty-print before vs after for demo."""
@@ -539,6 +541,8 @@ def aggregate_reports(
     episodes: list[EpisodeReport],
     *,
     behavior_examples: list[str] | None = None,
+    policy_used: str = "unknown",
+    episodes_per_difficulty: int = 0,
 ) -> EvaluationReport:
     """Aggregate per-episode records into one EvaluationReport."""
     if not episodes:
@@ -555,6 +559,8 @@ def aggregate_reports(
             reward_history=[],
             raw_reward_history=[],
             behavior_examples=behavior_examples or [],
+            policy_used=policy_used,
+            episodes_per_difficulty=episodes_per_difficulty,
         )
 
     reward_history = [episode.normalized_reward for episode in episodes]
@@ -593,6 +599,8 @@ def aggregate_reports(
         reward_history=reward_history,
         raw_reward_history=raw_reward_history,
         behavior_examples=behavior_examples or [],
+        policy_used=policy_used,
+        episodes_per_difficulty=episodes_per_difficulty,
     )
 
 
@@ -647,7 +655,11 @@ async def evaluate_policy_async(
                     action_selector=action_selector,
                 )
                 episodes.append(report)
-        return aggregate_reports(episodes)
+        return aggregate_reports(
+            episodes,
+            policy_used=policy,
+            episodes_per_difficulty=episodes_per_difficulty,
+        )
     finally:
         await env.close()
 

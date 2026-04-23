@@ -16,35 +16,54 @@ short_description: Enterprise incident response world model for OpenEnv
 
 # OpenEnv: Enterprise Incident Command Center (EICC)
 
-EICC is a deterministic OpenEnv environment for enterprise incident response.
-It extends the original customer-support triage workflow into a multi-app incident command simulation featuring cascading microservice failures, policy drift, long-horizon reasoning, and structured tool use.
+> **Theme:** `#3.1 World Modeling / Professional Tasks`
+> **Tagline:** *When everything is on fire, can your agent keep its cool?*
 
-- Live Hugging Face Space: [anuj2209-openenv-customer-support.hf.space](https://anuj2209-openenv-customer-support.hf.space)
-- OpenEnv API style: async `reset()` / `step()` / `state()` / `close()`
-- Backward-compatible legacy ticket mode + new incident mode
-- Theme: `#3.1 Professional Tasks` + Scaler AI Labs multi-app enterprise sub-theme
+EICC is a deterministic OpenEnv environment that trains LLM agents to behave like a senior SRE / incident commander: diagnose cascading microservice failures, cross-verify potentially outdated knowledge bases, coordinate tools and stakeholders, and execute multi-step remediation — all under SLA pressure and partial observability.
 
-## TL;DR
+- **Live Hugging Face Space:** [anuj2209-openenv-customer-support.hf.space](https://anuj2209-openenv-customer-support.hf.space)
+- **OpenEnv API:** async `reset()` / `step()` / `state()` / `close()` + HTTP server
+- **Backward-compatible ticket mode** + new multi-app **incident mode**
 
-- **Problem:** Enterprise incident response is a multi-app, partially observable, long-horizon task. Most benchmarks don't capture it.
-- **Environment:** 21 typed actions across 4 incident phases, 5 interdependent services, 8 enterprise subsystems, 18 hand-crafted scenarios, deterministic scoring.
-- **Training pipeline:** GRPO on Qwen2.5-3B via Unsloth + HF TRL, end-to-end with the running environment (not a static dataset).
-- **Evaluation pipeline:** deterministic episodes across difficulty tiers with normalized + raw reward, SLA, root-cause, long-horizon consistency, and 8 tracked behavioral skills; supports checkpoint-based adapter evaluation.
+---
 
-## How Judges Can Reproduce (quick path)
+## For Judges: 60-Second Walkthrough
 
-1. Open `train_notebook.ipynb` in Colab (T4 GPU).
-2. Run cells in order:
-   - Step 1: clone repo.
-   - Step 2: install deps.
-   - Step 3: dry-run sanity: `python train.py --iterations 1 --episodes 1 --k 2 --dry-run`.
-   - Step 4: baseline evaluation.
-   - Step 5: GRPO training (produces `artifacts/train/trained_adapter/`).
-   - Step 6: baseline vs trained-checkpoint comparison with `--plot`.
-   - Steps 7-8: inspect reports and reward curves.
-   - Steps 9-10 (optional): 2-seed reproducibility + mean ± std summary.
+1. **Problem (why it matters):** Most LLM benchmarks test isolated skills. Real enterprise incidents require partial observability, causal reasoning, long-horizon execution, and tool orchestration.
+2. **Environment:** 21 typed actions across 4 incident phases, 5-service causal mesh, 8 enterprise tools, 18 hand-crafted scenarios, deterministic reward (no LLM judge).
+3. **Training:** GRPO on Qwen2.5-3B via Unsloth + HF TRL in Colab. Reward includes strict JSON-shape, phase-availability, investigation-before-action, KB cross-verification, policy awareness, and trajectory-grounded action values. Concise-output and cap-hit penalties prevent reward hacking.
+4. **Evidence:** `evaluate.py` produces dual-panel reward curves (normalized + raw), per-difficulty breakdown, root-cause accuracy, 8 tracked behavioral skills, and a machine-readable `trained_report.json` that now records `policy_used` (checkpoint vs heuristic fallback) so judges can tell exactly which policy produced the numbers.
 
-All outputs are written to `artifacts/...` and can be downloaded directly from the Colab file browser.
+### Judging criteria mapping (40 / 30 / 20 / 10)
+
+| Criterion (weight) | How EICC scores |
+|---|---|
+| **Environment Innovation (40%)** | Partial-observability enterprise world model with causal service mesh, policy drift, outdated KBs, dynamic ticket arrivals, stakeholder patience, CAB approval gate, and blast-radius on wrong fixes. 11 explicit anti-shortcut mechanisms. |
+| **Storytelling (30%)** | Single-page README TL;DR, 3-min pitch + 2-min video scripts in `demo/`, architecture diagram, incident walkthrough, and HF mini-blog draft. |
+| **Reward Improvement (20%)** | `reward_curves.png` (dual-panel: normalized clamped + raw that exposes negative baselines), `baseline_report.json` vs `trained_report.json`, 8 behavioral skill diffs. |
+| **Reward & Training Pipeline (10%)** | GRPO with compact-JSON / single-JSON / cap-hit / multi-JSON / extra-text penalties; trajectory-grounded action-reward lookup; structured diagnostics every N batches with unhealthy-signal warnings. |
+
+---
+
+## Quick Reproduction (Colab)
+
+Open `train_notebook.ipynb` and run in order:
+
+| Step | Purpose | Typical time |
+|---|---|---|
+| 1 | Clone repo | < 10 s |
+| 2 | Install deps (Unsloth + TRL + peft + bitsandbytes) | ~3 min |
+| 3 | Dry-run sanity: `python train.py --dry-run` | < 30 s |
+| 4 | Baseline evaluation (writes `artifacts/eval/baseline_report.json`) | ~1 min |
+| 5a | Quick-mode GRPO training (`--iterations 10 --episodes 15 --k 2`) | ~1.5–2 hrs on T4 |
+| 5b | Full-mode GRPO training (`--iterations 20 --episodes 30 --k 4`) | ~6–8 hrs on T4 |
+| 6 | Post-training compare: `evaluate.py --policy compare --compare-trained-policy trained_checkpoint` | ~5–15 min |
+| 7–8 | Inspect reports and plot | instant |
+| 9–10 | (Optional) two-seed reproducibility | 2× Step 5 time |
+
+Artifacts land in `artifacts/...` and can be downloaded from the Colab file browser.
+
+---
 
 ## Environment Design
 
@@ -77,59 +96,60 @@ Actions are phase-gated: the agent sees only valid actions for the current phase
 
 ### Incident scenario tiers
 
-| Tier | Count | Steps | Customers | Typical Characteristics |
+| Tier | Count | Steps | Customers | Characteristics |
 |---|---:|---:|---:|---|
-| easy | 3 | 40 | 2-3 | single failure, clear root cause |
-| medium | 5 | 50 | 4-6 | cascading issues, red herrings, one policy drift |
-| hard | 7 | 70 | 8-12 | deeper cascades, outdated KB, multiple drifts |
-| nightmare | 3 | 80 | 10-15 | compound faults, high noise, maximum complexity |
+| easy | 3 | 40 | 2–3 | single failure, clear root cause |
+| medium | 5 | 50 | 4–6 | cascading issues, red herrings, one policy drift |
+| hard | 7 | 70 | 8–12 | deeper cascades, outdated KB, multiple drifts |
+| nightmare | 3 | 80 | 10–15 | compound faults, high noise, maximum complexity |
 
 ### Partial observability
 
-Hidden from agent (must be discovered): true root cause, full dependency graph on hard+, KB accuracy, current policy values, internal customer risk, red-herring symptoms.
+**Hidden from agent (must be discovered):** true root cause, full dependency graph on hard+, KB accuracy, current policy values, internal customer risk, red-herring symptoms.
 
-Visible: alert text, tool results, accumulated `known_facts`, stakeholder patience, SLA/step counter, phase-restricted `available_actions`.
+**Visible:** alert text, tool results, accumulated `known_facts`, stakeholder patience, SLA/step counter, phase-restricted `available_actions`.
+
+---
 
 ## Reward Design
 
 Per-step deterministic rewards shaped by:
 
-- action validity (structurally valid action for current phase)
-- investigation-before-action
-- KB cross-verification (query_kb followed by evidence-gathering)
-- policy-awareness before sensitive actions
-- root-cause correctness of `apply_fix`
+- structural validity + phase availability of the action
+- investigation-before-action, KB cross-verification, policy-awareness
+- root-cause correctness of `apply_fix` (with CAB approval gate + blast-radius penalty on wrong fixes)
 - customer tone matching against sentiment
 - stakeholder proactivity before patience decays
-- resource budgets (max fix attempts, max escalations)
+- resource budgets (max fix attempts, escalations, notifications)
 
-No LLM judge is used. All reward logic is in the repo (see `graders/` and `env/`).
+Training-time reward adds strict output-shape penalties (single JSON, no extra prose, cap-hit penalty) so the agent is pushed toward compact, parseable actions rather than noisy prose.
+
+No LLM judge is used. All reward logic is in the repo (`graders/` and `env/`).
+
+---
 
 ## Training Pipeline
 
-- `train.py`
-  - Collects trajectories from the live OpenEnv environment across a curriculum (easy → nightmare).
-  - Runs GRPO (Unsloth + HF TRL) on Qwen2.5-3B with LoRA adapters.
-  - Uses a structured reward with parse-rate diagnostics printed during training.
-  - Saves the trained adapter to `artifacts/train/trained_adapter/`.
-  - After training, attempts checkpoint-based evaluation; falls back to heuristic policy with a visible log line if checkpoint eval can't run.
-- `evaluate.py`
-  - Runs deterministic incident episodes per difficulty tier.
-  - Reports normalized reward, raw cumulative reward, SLA compliance, root-cause accuracy, long-horizon consistency, and 8 behavioral skill scores.
-  - Plots a dual-panel reward curve (normalized + raw) so the baseline is not hidden by clamping.
-- `train_notebook.ipynb`
-  - Colab-first flow with dry-run, baseline eval, training, compare eval, plotting, and optional two-seed reproducibility cells.
+- `train.py` — collects trajectories from the live environment across a curriculum (easy → nightmare), runs GRPO (Unsloth + TRL) on Qwen2.5-3B with LoRA, saves adapter to `artifacts/train/trained_adapter/`, then runs baseline vs trained evaluation with dual-panel reward plots.
+- `evaluate.py` — deterministic incident episodes per difficulty tier; reports normalized / raw reward, SLA compliance, root-cause accuracy, long-horizon consistency, 8 behavioral skills, and `policy_used` provenance.
+- `train_notebook.ipynb` — Colab-first flow with dry-run, baseline eval, training (quick or full), compare eval, plotting, and optional two-seed reproducibility.
 
-Key CLI examples:
+### Key CLI examples
 
 ```bash
+# Dry-run sanity (local, no GPU needed)
 python train.py --iterations 1 --episodes 1 --k 2 --dry-run
+
+# Quick training (Colab T4, ~1.5-2 hrs)
+python train.py --iterations 10 --episodes 15 --k 2 --max-completion-length 96
+
+# Full training (Colab T4, ~6-8 hrs)
+python train.py --iterations 20 --episodes 30 --k 4 --max-completion-length 128
+
+# Heuristic compare (fast evidence)
 python evaluate.py --policy compare --episodes-per-difficulty 5 --plot --output-dir artifacts/eval
-```
 
-Checkpoint-based evaluation (recommended for final submission):
-
-```bash
+# Checkpoint-based compare (use after a real training run)
 python evaluate.py --policy compare \
   --compare-trained-policy trained_checkpoint \
   --checkpoint-dir artifacts/train/trained_adapter \
@@ -137,57 +157,44 @@ python evaluate.py --policy compare \
   --episodes-per-difficulty 5 --plot --output-dir artifacts/eval_compare_ckpt
 ```
 
-Two-seed reproducibility:
-
-```bash
-python train.py --iterations 4 --episodes 8 --k 4 --seed 7 --output-dir artifacts/train_seed7
-python train.py --iterations 4 --episodes 8 --k 4 --seed 17 --output-dir artifacts/train_seed17
-```
+---
 
 ## Evaluation Metrics
 
 Per-episode:
 - Normalized reward (clamped to `[0, 1]`)
-- Raw cumulative reward (can be negative)
+- Raw cumulative reward (can be negative, exposed explicitly)
 - SLA compliance (pending tickets == 0 at end)
-- Root-cause accuracy (did at least one correct `apply_fix` land)
+- Root-cause accuracy (at least one correct `apply_fix` landed)
 - Long-horizon consistency (post-fix actions stay in the consistent set)
 - 8 tracked skills: investigation-before-action, KB cross-verification, policy checking, stakeholder proactivity, root-cause accuracy, tone matching, resource efficiency, red-herring dismissal
 
-Aggregates:
-- `avg_normalized_reward`
-- `avg_raw_reward`
-- Per-difficulty averages
+Aggregates: `avg_normalized_reward`, `avg_raw_reward`, per-difficulty averages, `policy_used`, `episodes_per_difficulty`.
+
+---
 
 ## Results
 
-This repository ships the full training and evaluation pipeline. Numerical results are produced by running the pipeline; we don't hard-code numbers into this README.
+This repository ships the full training and evaluation pipeline. Real numbers are produced by running the notebook; we don't hardcode claims into this README.
 
 When you run the full Colab notebook end-to-end on a T4:
-- Training output: `artifacts/train/trained_adapter/` (trained LoRA adapter)
+- Training output: `artifacts/train/trained_adapter/`
 - Evaluation output: `artifacts/eval/reward_curves.png`, `baseline_report.json`, `trained_report.json`
 
-For judges, the recommended evidence flow is:
-1. Run Step 5 (training) in `train_notebook.ipynb`.
-2. Run Step 6 with `--compare-trained-policy trained_checkpoint`.
-3. Inspect `reward_curves.png` and `trained_report.json` in `artifacts/eval/`.
+> **`policy_used` field:** both `baseline_report.json` and `trained_report.json` now include a `policy_used` field so you can confirm whether the trained-side numbers came from the **real Qwen LoRA checkpoint** (`trained_checkpoint`) or from the **deterministic heuristic fallback** (`trained_heuristic`) that activates if checkpoint loading fails. Console logs also print this.
 
-> Note on compare semantics: if you run `--policy compare` without `--compare-trained-policy trained_checkpoint`, the trained side is a deterministic trained-style heuristic policy (clearly labeled in logs). Use the checkpoint option above for strict before/after evidence from the actual trained adapter.
+---
 
 ## HTTP API (OpenEnv-compatible)
 
 Endpoints:
 
-- `POST /reset`
-- `POST /step`
-- `GET /state`
-- `POST /close`
-- `GET /health`
-- `POST /inference`
+- `POST /reset`, `POST /step`, `GET /state`, `POST /close`
+- `GET /health`, `POST /inference`
 
 Optional production headers:
 - `X-Session-ID`: isolate concurrent episodes per client/session
-- `X-API-Key`: required only when server is configured with `OPENENV_API_KEY`
+- `X-API-Key`: required only when the server is configured with `OPENENV_API_KEY`
 
 Example:
 
@@ -197,6 +204,8 @@ curl -X POST http://localhost:7860/reset \
   -d '{"mode":"incident","difficulty":"easy","seed":0}'
 ```
 
+---
+
 ## Setup (local)
 
 ```bash
@@ -205,6 +214,8 @@ python -m pytest tests/ -q
 ```
 
 Reproducible runtime dependencies are pinned in `requirements.lock`.
+
+---
 
 ## Deployment (Hugging Face Spaces)
 
@@ -218,43 +229,55 @@ curl http://localhost:7860/reset -X POST \
 
 The container defaults to 1 worker with a healthcheck on `/health`. Episode state is in-process, so horizontal scaling requires an external session store.
 
+---
+
 ## Determinism Contract
 
 - Seeded scenario selection and service-mesh behavior
 - No LLM judge in scoring
-- No wall-clock/time-based randomness
+- No wall-clock / time-based randomness
 - Same `(seed, difficulty, mode)` triple deterministically yields the same scenario
+- Greedy decode (`do_sample=False`) for checkpoint evaluation
+
+---
 
 ## Demo Assets
 
 - Architecture diagram: `demo/architecture_diagram.md`
 - Incident walkthrough: `demo/incident_resolution_walkthrough.md`
-- Reward curve sketch (illustrative): `demo/reward_curve.svg`
 - 3-minute pitch script: `demo/pitch_script_3min.md`
 - 2-minute video script: `demo/video_script_2min.md`
-- Mini-blog draft: `demo/hf_mini_blog.md`
-- Real evaluation outputs are produced by `evaluate.py` into `--output-dir` (default `artifacts/eval`).
+- HF mini-blog draft: `demo/hf_mini_blog.md`
+- Reward curve PNG is produced by `evaluate.py` into `--output-dir` (default `artifacts/eval/reward_curves.png`)
+
+---
 
 ## Public Submission Links
 
-The links below are filled in at the time of final submission; treat `TODO_*` as placeholders until they are replaced with live URLs:
+> These links are finalized at submission time. Replace placeholders as soon as assets are published.
 
 - Hugging Face Space: [anuj2209-openenv-customer-support.hf.space](https://anuj2209-openenv-customer-support.hf.space)
-- Hugging Face mini-blog: `TODO_ADD_HF_BLOG_URL`
-- YouTube demo (<2 min): `TODO_ADD_YOUTUBE_URL`
-- Optional slides: `TODO_ADD_SLIDES_URL`
+- Hugging Face mini-blog: *pending publish — draft in `demo/hf_mini_blog.md`*
+- YouTube demo (<2 min): *pending publish — script in `demo/video_script_2min.md`*
+- Optional slide deck: *pending*
+
+---
 
 ## Hackathon Submission Checklist
 
-- [x] OpenEnv-based environment with manifest: `openenv.yaml`
-- [x] Training script + Colab notebook using TRL/Unsloth: `train.py`, `train_notebook.ipynb`
-- [x] Hugging Face Space deployment link in README
-- [x] README motivates the problem, explains how the env works, and describes results flow
-- [x] Evaluation pipeline emits baseline + trained-side reports and reward curves
-- [x] Checkpoint-based evaluation path (`--policy trained_checkpoint`) is available
-- [ ] Publish a Hugging Face mini-blog (<2 min read) and add URL in **Public Submission Links**
-- [ ] Publish a <2 min YouTube demo and add URL in **Public Submission Links**
-- [ ] Commit one real run snapshot (plot + reports) before submission
+- [x] OpenEnv-based environment with manifest (`openenv.yaml`)
+- [x] Training script + Colab notebook using Unsloth + HF TRL (`train.py`, `train_notebook.ipynb`)
+- [x] Hugging Face Space deployment + link in README
+- [x] README motivates the problem, explains the env, and describes the results flow
+- [x] Evaluation pipeline emits baseline + trained reports and a dual-panel reward curve
+- [x] Checkpoint-based evaluation path (`--policy trained_checkpoint`) + heuristic fallback with `policy_used` provenance
+- [x] HF mini-blog draft committed (`demo/hf_mini_blog.md`)
+- [x] Pitch and video scripts committed (`demo/pitch_script_3min.md`, `demo/video_script_2min.md`)
+- [ ] Publish the HF mini-blog and paste URL in **Public Submission Links**
+- [ ] Publish the <2 min YouTube demo and paste URL in **Public Submission Links**
+- [ ] Commit one real run snapshot (plot + reports) before final submission
+
+---
 
 ## Repository Layout
 
@@ -263,11 +286,13 @@ env/           # world + systems + environment dispatch/state machine
 models/        # pydantic action/observation/incident schemas
 graders/       # deterministic ticket + incident graders
 tasks/         # ticket bank + incident bank + scenario data
-tests/         # legacy + incident test suite
+tests/         # full backward-compat + incident test suite (404 tests)
 train.py       # GRPO training pipeline
-evaluate.py    # deterministic evaluation + before/after comparison
+evaluate.py    # deterministic evaluation + before/after comparison + plotting
 openenv.yaml   # OpenEnv manifest
 ```
+
+---
 
 ## License
 

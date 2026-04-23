@@ -21,7 +21,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from env.environment import CustomerSupportEnv
-from evaluate import PolicyState, evaluate_policy, plot_reports
+from evaluate import (
+    PolicyState,
+    behavior_diffs,
+    evaluate_policy,
+    plot_reports,
+)
 from evaluate import choose_policy_action as eval_choose_policy_action
 from models.observation import Observation
 
@@ -596,31 +601,51 @@ def main() -> None:
                 print(f"[reward] scoring error: {exc!r}; sample length={len(completion)}")
                 rewards.append(-0.10)
 
-        # Periodic parse-rate diagnostics so judges/you see training health.
+        # Keep logs concise: report health checkpoints and only print
+        # sample completions when signal quality is poor.
         batch_count = reward_function.__dict__.setdefault("_call_count", 0) + 1
         reward_function.__dict__["_call_count"] = batch_count
-        if batch_count % 10 == 0 or batch_count == 1:
+        if batch_count == 1 or batch_count % 25 == 0:
             total = max(1, reward_stats["total"])
             samples = max(1, length_stats["count"])
             avg_len = length_stats["sum"] / samples
+            valid_json_rate = reward_stats["valid_json"] / total
+            valid_action_rate = reward_stats["valid_action"] / total
+            available_rate = reward_stats["available"] / total
+            unterminated_rate = reward_stats["unterminated"] / total
+            cap_hit_rate = reward_stats["cap_hit"] / total
+            multi_json_rate = reward_stats["multi_json"] / total
+            extra_text_rate = reward_stats["extra_text"] / total
             print(
                 "[reward] batch={} total={} valid_json={:.0%} valid_action={:.0%} "
                 "available={:.0%} unterminated={:.0%} cap_hit={:.0%} "
                 "multi_json={:.0%} extra_text={:.0%} avg_len={:.0f} max_len={}".format(
                     batch_count,
                     reward_stats["total"],
-                    reward_stats["valid_json"] / total,
-                    reward_stats["valid_action"] / total,
-                    reward_stats["available"] / total,
-                    reward_stats["unterminated"] / total,
-                    reward_stats["cap_hit"] / total,
-                    reward_stats["multi_json"] / total,
-                    reward_stats["extra_text"] / total,
+                    valid_json_rate,
+                    valid_action_rate,
+                    available_rate,
+                    unterminated_rate,
+                    cap_hit_rate,
+                    multi_json_rate,
+                    extra_text_rate,
                     avg_len,
                     length_stats["max"],
                 )
             )
-            if completions:
+            unhealthy_signal = (
+                valid_json_rate < 0.90
+                or valid_action_rate < 0.80
+                or unterminated_rate > 0.10
+                or cap_hit_rate > 0.30
+                or multi_json_rate > 0.10
+                or extra_text_rate > 0.10
+            )
+            if unhealthy_signal:
+                print(
+                    "[reward] warning: noisy outputs detected; prefer exactly one compact JSON object."
+                )
+            if unhealthy_signal and completions:
                 preview_raw = completions[0]
                 preview = preview_raw if isinstance(preview_raw, str) else str(preview_raw or "")
                 preview = preview.replace("\n", " ")
@@ -684,15 +709,13 @@ def main() -> None:
             policy="trained_heuristic",
             episodes_per_difficulty=args.eval_episodes,
         )
-    trained.behavior_examples = [
-        "Agent shifts from direct fixes to monitoring-first triage.",
-        "Agent verifies KB-guided actions using service logs before fixing.",
-        "Agent performs verify_fix and postmortem actions more consistently.",
-    ]
+    # Structured, truthful behavior diff derived from actual eval metrics.
+    trained.behavior_examples = behavior_diffs(baseline, trained)
     write_json(output_dir / "baseline_report.json", asdict(baseline))
     write_json(output_dir / "trained_report.json", asdict(trained))
     plot_reports(baseline, trained, output_dir)
     trained.print_comparison(baseline)
+    print(f"[train] trained_report.policy_used={trained.policy_used}")
 
 
 if __name__ == "__main__":
