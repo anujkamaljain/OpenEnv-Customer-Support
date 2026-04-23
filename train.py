@@ -79,6 +79,11 @@ def _extract_first_json_object(text: str) -> dict[str, object] | None:
     return None
 
 
+def _extract_json_object_matches(text: str) -> list[re.Match[str]]:
+    """Return regex matches for JSON-like objects found in text."""
+    return list(_JSON_OBJECT_RE.finditer(text or ""))
+
+
 @dataclass(slots=True)
 class TrajectoryRow:
     """One prompt/completion/reward row used for GRPO datasets."""
@@ -463,6 +468,9 @@ def main() -> None:
         "valid_action": 0,
         "available": 0,
         "unterminated": 0,
+        "multi_json": 0,
+        "extra_text": 0,
+        "cap_hit": 0,
     }
     length_stats = {"sum": 0.0, "count": 0, "max": 0}
 
@@ -496,7 +504,7 @@ def main() -> None:
                 reward_stats["unterminated"] += 1
                 return -0.25
             if _mentions_known_action(completion):
-                return -0.05
+                return -0.15
             return -0.10
 
         reward_stats["valid_json"] += 1
@@ -541,7 +549,24 @@ def main() -> None:
         trajectory_reward = trajectory_action_reward.get((prompt, action_type), 0.0)
         score += 0.4 * float(trajectory_reward)
 
+        # Strongly prefer exactly one JSON object and no trailing/leading prose.
+        matches = _extract_json_object_matches(completion)
+        if matches:
+            first = matches[0]
+            if len(matches) > 1:
+                reward_stats["multi_json"] += 1
+                score -= 0.22
+            prefix = completion[: first.start()].strip()
+            suffix = completion[first.end() :].strip()
+            if prefix or suffix:
+                reward_stats["extra_text"] += 1
+                score -= 0.18
+
         completion_len = len(completion)
+        cap_threshold = max(16, int(args.max_completion_length * 0.95))
+        if completion_len >= cap_threshold:
+            reward_stats["cap_hit"] += 1
+            score -= 0.20
         if completion_len <= 120:
             score += 0.01
         elif completion_len > 400:
@@ -580,13 +605,17 @@ def main() -> None:
             avg_len = length_stats["sum"] / samples
             print(
                 "[reward] batch={} total={} valid_json={:.0%} valid_action={:.0%} "
-                "available={:.0%} unterminated={:.0%} avg_len={:.0f} max_len={}".format(
+                "available={:.0%} unterminated={:.0%} cap_hit={:.0%} "
+                "multi_json={:.0%} extra_text={:.0%} avg_len={:.0f} max_len={}".format(
                     batch_count,
                     reward_stats["total"],
                     reward_stats["valid_json"] / total,
                     reward_stats["valid_action"] / total,
                     reward_stats["available"] / total,
                     reward_stats["unterminated"] / total,
+                    reward_stats["cap_hit"] / total,
+                    reward_stats["multi_json"] / total,
+                    reward_stats["extra_text"] / total,
                     avg_len,
                     length_stats["max"],
                 )
