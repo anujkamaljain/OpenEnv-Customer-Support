@@ -457,7 +457,14 @@ def main() -> None:
         "update_kb": ("article_title", "content"),
     }
 
-    reward_stats = {"total": 0, "valid_json": 0, "valid_action": 0, "available": 0}
+    reward_stats = {
+        "total": 0,
+        "valid_json": 0,
+        "valid_action": 0,
+        "available": 0,
+        "unterminated": 0,
+    }
+    length_stats = {"sum": 0.0, "count": 0, "max": 0}
 
     def _prompt_field(prompt: str, key: str) -> str:
         prefix = f"{key}="
@@ -476,101 +483,121 @@ def main() -> None:
         stripped = text.strip()
         return stripped.endswith("}")
 
+    def _score_single(prompt: str, completion: str) -> float:
+        reward_stats["total"] += 1
+        length_stats["sum"] += len(completion)
+        length_stats["count"] += 1
+        if len(completion) > length_stats["max"]:
+            length_stats["max"] = len(completion)
+
+        action_payload = _extract_first_json_object(completion)
+        if action_payload is None:
+            if not _looks_terminated_json(completion):
+                reward_stats["unterminated"] += 1
+                return -0.25
+            if _mentions_known_action(completion):
+                return -0.05
+            return -0.10
+
+        reward_stats["valid_json"] += 1
+        action_type = str(action_payload.get("action_type", "")).strip()
+        if not action_type:
+            return -0.04
+
+        reward_stats["valid_action"] += 1
+
+        available_actions_raw = _prompt_field(prompt, "available_actions")
+        available_actions: set[str] = set()
+        if available_actions_raw:
+            try:
+                parsed_available = ast.literal_eval(available_actions_raw)
+                if isinstance(parsed_available, list):
+                    available_actions = {str(item) for item in parsed_available}
+            except (ValueError, SyntaxError):
+                available_actions = set()
+
+        phase = _prompt_field(prompt, "phase")
+
+        score = 0.05
+        if action_type in KNOWN_ACTION_TYPES:
+            score += 0.04
+
+        if action_type in available_actions:
+            score += 0.12
+            reward_stats["available"] += 1
+        else:
+            score -= 0.04
+
+        if action_type in preferred_actions.get(phase, set()):
+            score += 0.06
+
+        needed = required_fields.get(action_type, ())
+        if needed:
+            present = sum(
+                1 for field_name in needed if action_payload.get(field_name) not in (None, "")
+            )
+            score += 0.06 * (present / max(1, len(needed)))
+
+        trajectory_reward = trajectory_action_reward.get((prompt, action_type), 0.0)
+        score += 0.4 * float(trajectory_reward)
+
+        completion_len = len(completion)
+        if completion_len <= 120:
+            score += 0.01
+        elif completion_len > 400:
+            score -= 0.40
+        elif completion_len > 240:
+            score -= 0.20
+        elif completion_len > 160:
+            score -= 0.03
+
+        return max(-1.0, min(1.0, score))
+
     def reward_function(
         prompts: list[str],
         completions: list[str],
         **_: object,
     ) -> list[float]:
         rewards: list[float] = []
-        for prompt, completion in zip(prompts, completions):
-            reward_stats["total"] += 1
-
-            action_payload = _extract_first_json_object(completion)
-            if action_payload is None:
-                # Partial credit for effort even without valid JSON so GRPO
-                # always sees some variance instead of a constant floor.
-                if not _looks_terminated_json(completion):
-                    # Heavily penalize likely max-length truncation / unterminated payloads.
-                    rewards.append(-0.25)
-                elif _mentions_known_action(completion):
-                    rewards.append(-0.05)
-                else:
-                    rewards.append(-0.10)
-                continue
-
-            reward_stats["valid_json"] += 1
-            action_type = str(action_payload.get("action_type", "")).strip()
-            if not action_type:
-                rewards.append(-0.04)
-                continue
-
-            reward_stats["valid_action"] += 1
-
-            available_actions_raw = _prompt_field(prompt, "available_actions")
-            available_actions: set[str] = set()
-            if available_actions_raw:
-                try:
-                    parsed_available = ast.literal_eval(available_actions_raw)
-                    if isinstance(parsed_available, list):
-                        available_actions = {str(item) for item in parsed_available}
-                except (ValueError, SyntaxError):
-                    available_actions = set()
-
-            phase = _prompt_field(prompt, "phase")
-
-            # Base signal for a structurally valid JSON action.
-            score = 0.05
-
-            if action_type in KNOWN_ACTION_TYPES:
-                score += 0.04
-
-            if action_type in available_actions:
-                score += 0.12
-                reward_stats["available"] += 1
-            else:
-                score -= 0.04
-
-            if action_type in preferred_actions.get(phase, set()):
-                score += 0.06
-
-            needed = required_fields.get(action_type, ())
-            if needed:
-                present = sum(
-                    1 for field_name in needed if action_payload.get(field_name) not in (None, "")
-                )
-                score += 0.06 * (present / max(1, len(needed)))
-
-            trajectory_reward = trajectory_action_reward.get((prompt, action_type), 0.0)
-            score += 0.4 * float(trajectory_reward)
-
-            # Penalize noisy / long outputs, reward concise JSON.
-            completion_len = len(completion)
-            if completion_len <= 120:
-                score += 0.01
-            elif completion_len > 400:
-                score -= 0.40
-            elif completion_len > 240:
-                score -= 0.20
-            elif completion_len > 160:
-                score -= 0.03
-
-            rewards.append(max(-1.0, min(1.0, score)))
+        for raw_prompt, raw_completion in zip(prompts, completions):
+            prompt = raw_prompt if isinstance(raw_prompt, str) else str(raw_prompt or "")
+            completion = (
+                raw_completion if isinstance(raw_completion, str) else str(raw_completion or "")
+            )
+            try:
+                rewards.append(_score_single(prompt, completion))
+            except Exception as exc:  # pragma: no cover - defensive guard
+                # Never let a single bad sample crash the reward callback.
+                print(f"[reward] scoring error: {exc!r}; sample length={len(completion)}")
+                rewards.append(-0.10)
 
         # Periodic parse-rate diagnostics so judges/you see training health.
         batch_count = reward_function.__dict__.setdefault("_call_count", 0) + 1
         reward_function.__dict__["_call_count"] = batch_count
         if batch_count % 10 == 0 or batch_count == 1:
             total = max(1, reward_stats["total"])
+            samples = max(1, length_stats["count"])
+            avg_len = length_stats["sum"] / samples
             print(
                 "[reward] batch={} total={} valid_json={:.0%} valid_action={:.0%} "
-                "available={:.0%}".format(
+                "available={:.0%} unterminated={:.0%} avg_len={:.0f} max_len={}".format(
                     batch_count,
                     reward_stats["total"],
                     reward_stats["valid_json"] / total,
                     reward_stats["valid_action"] / total,
                     reward_stats["available"] / total,
+                    reward_stats["unterminated"] / total,
+                    avg_len,
+                    length_stats["max"],
                 )
             )
+            if completions:
+                preview_raw = completions[0]
+                preview = preview_raw if isinstance(preview_raw, str) else str(preview_raw or "")
+                preview = preview.replace("\n", " ")
+                if len(preview) > 160:
+                    preview = preview[:160] + "..."
+                print(f"[reward] sample completion: {preview}")
         return rewards
 
     config = _build_grpo_config(
