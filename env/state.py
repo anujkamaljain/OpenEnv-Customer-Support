@@ -664,11 +664,14 @@ class IncidentState:
     def to_observation(self) -> Observation:
         """Build incident-mode observation payload."""
         ticket = self.world.support_queue[0] if self.world.support_queue else None
+        ticket_text = (
+            getattr(ticket, "body", None) or getattr(ticket, "ticket_text", None) or ""
+        ) if ticket is not None else self.incident.description
         alerts = self.world.service_mesh.generate_alerts(self.steps_taken)
         self.active_alerts = [alert.message for alert in alerts]
         return Observation(
             ticket_id=ticket.ticket_id if ticket is not None else self.incident.incident_id,
-            ticket_text=ticket.body if ticket is not None else self.incident.description,
+            ticket_text=ticket_text,
             customer_sentiment="frustrated",
             customer_tier="enterprise",
             customer_value="high",

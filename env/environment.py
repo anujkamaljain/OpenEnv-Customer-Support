@@ -167,9 +167,12 @@ class _IncidentRuntime:
         from models.observation import Observation
 
         ticket = self.world.support_queue[0] if self.world.support_queue else None
+        ticket_text = (
+            getattr(ticket, "body", None) or getattr(ticket, "ticket_text", None) or ""
+        ) if ticket is not None else self.incident.description
         return Observation(
             ticket_id=ticket.ticket_id if ticket is not None else self.incident.incident_id,
-            ticket_text=ticket.body if ticket is not None else self.incident.description,
+            ticket_text=ticket_text,
             customer_sentiment="frustrated",
             customer_tier="enterprise",
             customer_value="high",

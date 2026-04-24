@@ -71,6 +71,20 @@ REQUIRED_FIELDS_BY_ACTION: dict[str, tuple[str, ...]] = {
     "update_kb": ("article_title", "content"),
 }
 
+PHASE_ALLOWED_ACTIONS: dict[str, set[str]] = {
+    "triage": {"check_monitoring", "query_kb", "classify"},
+    "investigation": {
+        "check_monitoring",
+        "query_kb",
+        "fetch_logs",
+        "probe_service",
+        "route",
+        "fetch_user_data",
+    },
+    "response": {"check_policy", "notify_stakeholders", "apply_fix", "respond"},
+    "resolution": {"verify_fix", "write_postmortem", "update_kb", "resolve", "respond"},
+}
+
 
 @dataclass(slots=True)
 class EpisodeReport:
@@ -154,7 +168,11 @@ class PolicyState:
     has_resolved: bool = False
     has_fetched_logs: bool = False
     has_probed_service: bool = False
+    has_written_postmortem: bool = False
+    has_updated_kb: bool = False
     known_service: str = "auth"
+    known_fix_type: str = "restart_service"
+    known_root_cause: str = ""
 
 
 def _is_trained_policy(policy: PolicyKind) -> bool:
@@ -205,6 +223,48 @@ def _pick_impacted_service(obs: Observation, default_service: str) -> str:
     return default_service
 
 
+# Maps root_cause failure modes to the correct fix_type.
+_FAILURE_FIX_MAP: dict[str, str] = {
+    "rate_limiting": "restart_service",
+    "token_expiry": "config_change",
+    "config_corruption": "config_change",
+    "oom": "memory_increase",
+    "connection_pool_exhaustion": "restart_service",
+    "replication_lag": "schema_migration",
+    "gateway_timeout": "restart_service",
+    "validation_errors": "config_change",
+    "idempotency_failure": "data_fix",
+    "batch_job_runaway": "memory_increase",
+    "query_timeout": "schema_migration",
+    "stale_cache": "restart_service",
+    "queue_overflow": "restart_service",
+    "template_error": "config_change",
+    "rate_exceeded": "memory_increase",
+}
+
+
+def _extract_root_cause_from_facts(
+    obs: Observation, state: PolicyState
+) -> None:
+    """Update state with root cause and fix info from probe/log evidence."""
+    facts = obs.known_facts or {}
+    # Probe results contain "observed failure signature: <mode>" for high-observability services
+    for key, value in facts.items():
+        if not isinstance(key, str):
+            continue
+        if key.startswith("probe:"):
+            if isinstance(value, dict):
+                findings = value.get("findings", [])
+                if isinstance(findings, list):
+                    for f in findings:
+                        if isinstance(f, str) and "observed failure signature:" in f:
+                            mode = f.split("observed failure signature:")[-1].strip()
+                            if mode and mode != "unknown":
+                                state.known_root_cause = mode
+                                if mode in _FAILURE_FIX_MAP:
+                                    state.known_fix_type = _FAILURE_FIX_MAP[mode]
+
+
 def choose_policy_action(
     obs: Observation,
     state: PolicyState,
@@ -217,13 +277,17 @@ def choose_policy_action(
     customer_id = _default_customer_id(obs)
     state.known_service = _pick_impacted_service(obs, state.known_service)
 
+    # Trained policy extracts root cause from evidence gathered during investigation
+    if trained_mode:
+        _extract_root_cause_from_facts(obs, state)
+
     if phase == "triage":
         if "check_monitoring" in available and not state.has_checked_monitoring:
             state.has_checked_monitoring = True
             return {"action_type": "check_monitoring", "service_name": None}
         if "query_kb" in available and not state.has_queried_kb and trained_mode:
             state.has_queried_kb = True
-            return {"action_type": "query_kb", "query": "payment 500 errors"}
+            return {"action_type": "query_kb", "query": "service outage"}
         if "classify" in available:
             priority = _priority_from_max_steps(obs.max_steps)
             if policy == "baseline":
@@ -240,14 +304,8 @@ def choose_policy_action(
             return {"action_type": "check_monitoring", "service_name": None}
         if "query_kb" in available and not state.has_queried_kb:
             state.has_queried_kb = True
-            return {"action_type": "query_kb", "query": "payment outage"}
-        if trained_mode and "fetch_logs" in available and not state.has_fetched_logs:
-            state.has_fetched_logs = True
-            return {
-                "action_type": "fetch_logs",
-                "service_name": state.known_service,
-                "time_range": "last_15m",
-            }
+            return {"action_type": "query_kb", "query": "service outage"}
+        # Trained policy probes the actual impacted service to get root cause
         if "probe_service" in available and not state.has_probed_service:
             state.has_probed_service = True
             service = "payments" if policy == "baseline" else state.known_service
@@ -255,6 +313,13 @@ def choose_policy_action(
                 "action_type": "probe_service",
                 "service_name": service,
                 "check_type": "logs",
+            }
+        if trained_mode and "fetch_logs" in available and not state.has_fetched_logs:
+            state.has_fetched_logs = True
+            return {
+                "action_type": "fetch_logs",
+                "service_name": state.known_service,
+                "time_range": "last_15m",
             }
         if "route" in available:
             return {"action_type": "route", "department": "technical"}
@@ -265,6 +330,16 @@ def choose_policy_action(
         if trained_mode and "check_policy" in available and not state.has_checked_policy:
             state.has_checked_policy = True
             return {"action_type": "check_policy", "policy_type": "compensation"}
+        if "apply_fix" in available and not state.has_applied_fix:
+            state.has_applied_fix = True
+            # Trained policy uses the correct service AND fix_type from evidence
+            service = "payments" if policy == "baseline" else state.known_service
+            fix_type = "restart_service" if policy == "baseline" else state.known_fix_type
+            return {
+                "action_type": "apply_fix",
+                "service_name": service,
+                "fix_type": fix_type,
+            }
         if "notify_stakeholders" in available and not state.has_notified and trained_mode:
             state.has_notified = True
             return {
@@ -272,14 +347,6 @@ def choose_policy_action(
                 "stakeholder": "all",
                 "message": "Incident impact assessed and remediation underway.",
                 "urgency": "warning",
-            }
-        if "apply_fix" in available and not state.has_applied_fix:
-            state.has_applied_fix = True
-            service = "payments" if policy == "baseline" else state.known_service
-            return {
-                "action_type": "apply_fix",
-                "service_name": service,
-                "fix_type": "restart_service",
             }
         if "respond" in available:
             tone = "formal" if policy == "baseline" else "empathetic"
@@ -293,20 +360,30 @@ def choose_policy_action(
         if "verify_fix" in available and not state.has_verified_fix:
             state.has_verified_fix = True
             return {"action_type": "verify_fix", "service_name": state.known_service}
-        if "write_postmortem" in available and trained_mode:
+        if "write_postmortem" in available and trained_mode and not state.has_written_postmortem:
+            state.has_written_postmortem = True
             return {
                 "action_type": "write_postmortem",
                 "summary": "Incident resolved after service remediation and verification.",
-                "root_cause_description": "Primary authentication service instability.",
+                "root_cause_description": f"Root cause: {state.known_root_cause or 'service instability'}.",
                 "remediation_steps": ["checked monitoring", "applied fix", "verified recovery"],
                 "prevention_measures": ["refresh runbook", "add targeted alert"],
             }
-        if "update_kb" in available and trained_mode:
+        if "update_kb" in available and trained_mode and not state.has_updated_kb:
+            state.has_updated_kb = True
             return {
                 "action_type": "update_kb",
-                "article_title": "Payment outage triage",
-                "content": "Verify auth health and logs before database restarts.",
-                "tags": ["incident", "payments", "auth"],
+                "article_title": "Incident triage playbook",
+                "content": "Verify service health and probe root cause before applying fixes.",
+                "tags": ["incident", "triage"],
+            }
+        if "notify_stakeholders" in available and not state.has_notified and trained_mode:
+            state.has_notified = True
+            return {
+                "action_type": "notify_stakeholders",
+                "stakeholder": "all",
+                "message": "Incident fully resolved. Postmortem complete.",
+                "urgency": "info",
             }
         if "resolve" in available and not state.has_resolved:
             state.has_resolved = True
@@ -373,10 +450,16 @@ def _sanitize_checkpoint_action(
     obs: Observation,
     state: PolicyState,
     payload: dict[str, object] | None,
+    decoded_text: str,
 ) -> dict[str, object]:
     """Return a safe action for env.step, falling back to heuristic when needed."""
     fallback = choose_policy_action(obs, state, "trained_heuristic")
+
     if not isinstance(payload, dict):
+        return fallback
+
+    # Reject obviously broken outputs (HTML tags, chat-style "Human:" bleed)
+    if re.search(r"<[^>]+>", decoded_text or "") or "Human:" in (decoded_text or ""):
         return fallback
 
     action_type = str(payload.get("action_type", "")).strip()
@@ -436,16 +519,20 @@ def _build_checkpoint_selector(
         encoded = {k: v.to(device) for k, v in encoded.items()}
         output = model.generate(
             **encoded,
-            max_new_tokens=96,
+            max_new_tokens=192,
             do_sample=False,
-            temperature=0.0,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
         new_tokens = output[0][encoded["input_ids"].shape[1] :]
         decoded = tokenizer.decode(new_tokens, skip_special_tokens=True)
         payload = _extract_first_json_action(decoded)
-        return _sanitize_checkpoint_action(obs=obs, state=state, payload=payload)
+        return _sanitize_checkpoint_action(
+            obs=obs,
+            state=state,
+            payload=payload,
+            decoded_text=decoded,
+        )
 
     return _selector
 

@@ -276,6 +276,10 @@ def _run_checkpoint_eval_subprocess(
     checkpoint eval in a fresh Python process avoids cross-library monkey-patch
     conflicts (for example, Qwen attention apply_qkv attribute errors).
     """
+    if not checkpoint_dir.exists():
+        raise FileNotFoundError(f"Adapter directory not found: {checkpoint_dir}")
+    print(f"[train] launching checkpoint evaluation subprocess for {checkpoint_dir}")
+
     eval_output_dir = output_dir / "checkpoint_eval"
     eval_cmd = [
         sys.executable,
@@ -291,7 +295,24 @@ def _run_checkpoint_eval_subprocess(
         "--output-dir",
         str(eval_output_dir),
     ]
-    subprocess.run(eval_cmd, check=True)
+    result = subprocess.run(
+        eval_cmd,
+        capture_output=True,
+        text=True,
+        timeout=600,  # 10-minute timeout for model loading + inference
+    )
+    if result.stdout:
+        for line in result.stdout.strip().splitlines()[-10:]:
+            print(f"  [checkpoint-eval stdout] {line}")
+    if result.returncode != 0:
+        stderr_tail = (result.stderr or "")[-500:]
+        print(f"  [checkpoint-eval FAILED] exit={result.returncode}")
+        if stderr_tail:
+            print(f"  [checkpoint-eval stderr] ...{stderr_tail}")
+        raise RuntimeError(
+            f"Checkpoint eval subprocess failed (exit={result.returncode})"
+        )
+
     report_path = eval_output_dir / "trained_report.json"
     if not report_path.exists():
         raise FileNotFoundError(f"Missing checkpoint evaluation report: {report_path}")
@@ -299,7 +320,10 @@ def _run_checkpoint_eval_subprocess(
     from evaluate import EvaluationReport
 
     payload = json.loads(report_path.read_text(encoding="utf-8"))
-    return EvaluationReport(**payload)
+    report = EvaluationReport(**payload)
+    print(f"[train] checkpoint eval complete: policy_used={report.policy_used} "
+          f"avg_norm={report.avg_normalized_reward:.3f}")
+    return report
 
 
 def _seed_everything(seed: int) -> None:
@@ -332,7 +356,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-completion-length",
         type=int,
-        default=128,
+        default=256,
         help="Max new tokens the policy generates per action (kept short for JSON).",
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -376,12 +400,13 @@ def _build_grpo_config(
     elif "response_length" in params:
         kwargs["response_length"] = max_completion_length
 
-    # GRPO enforces per_device_train_batch_size == num_generations.
-    # To increase effective batch size, raise gradient_accumulation_steps.
+    # GRPO requires per_device_train_batch_size to be a multiple of
+    # num_generations. Setting them equal gives one prompt per device;
+    # gradient_accumulation_steps controls effective batch size.
     if "per_device_train_batch_size" in params:
-        kwargs["per_device_train_batch_size"] = 2
+        kwargs["per_device_train_batch_size"] = k
     elif "train_batch_size" in params:
-        kwargs["train_batch_size"] = 2
+        kwargs["train_batch_size"] = k
 
     if "gradient_accumulation_steps" in params:
         kwargs["gradient_accumulation_steps"] = 2
@@ -391,6 +416,11 @@ def _build_grpo_config(
         kwargs["temperature"] = 0.8
     if "top_p" in params:
         kwargs["top_p"] = 0.95
+
+    # Stop generation after a newline so the model can produce short,
+    # clean single-JSON outputs instead of padding to max_completion_length.
+    if "stop_strings" in params:
+        kwargs["stop_strings"] = ["\n"]
 
     return GRPOConfig(**kwargs)
 
@@ -596,31 +626,36 @@ def main() -> None:
         score += 0.25 * float(trajectory_reward)
 
         # Strongly prefer exactly one JSON object and no trailing/leading prose.
+        # These penalties must dominate so GRPO learns to produce clean outputs.
         matches = _extract_json_object_matches(completion)
+        is_clean = False
         if matches:
             first = matches[0]
-            if len(matches) > 1:
-                reward_stats["multi_json"] += 1
-                score -= 0.08
             prefix = completion[: first.start()].strip()
             suffix = completion[first.end() :].strip()
+            if len(matches) > 1:
+                reward_stats["multi_json"] += 1
+                score -= 0.40  # Harsh: must learn single-object output
             if prefix or suffix:
                 reward_stats["extra_text"] += 1
-                score -= 0.06
+                score -= 0.30  # Harsh: must learn no extra text
+            if len(matches) == 1 and not prefix and not suffix:
+                is_clean = True
+                score += 0.15  # Strong bonus for exactly one clean JSON object
 
         completion_len = len(completion)
         cap_threshold = max(16, int(args.max_completion_length * 0.95))
         if completion_len >= cap_threshold:
             reward_stats["cap_hit"] += 1
-            score -= 0.06
-        if completion_len <= 120:
-            score += 0.03
+            score -= 0.25  # Severe: model must learn to stop early
+        if is_clean and completion_len <= 120:
+            score += 0.05  # Reward concise clean completions
         elif completion_len > 400:
-            score -= 0.15
+            score -= 0.20
         elif completion_len > 240:
-            score -= 0.08
+            score -= 0.12
         elif completion_len > 160:
-            score -= 0.03
+            score -= 0.06
 
         return max(-1.0, min(1.0, score))
 
