@@ -26,6 +26,8 @@ We track normalized reward, raw cumulative reward, root-cause accuracy, and long
 
 "Result snapshot: baseline tends to accumulate negative raw reward, while trained policy shifts positive and improves root-cause handling."
 
+"We also log `policy_used` for transparency, so judges can verify whether a run used the checkpoint policy or a guarded fallback."
+
 ## 1:43 - 2:00 Close
 
 "EICC is deterministic, reproducible, and deployed on Hugging Face Spaces.  

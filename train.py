@@ -299,7 +299,6 @@ def _run_checkpoint_eval_subprocess(
         eval_cmd,
         capture_output=True,
         text=True,
-        timeout=600,  # 10-minute timeout for model loading + inference
     )
     if result.stdout:
         for line in result.stdout.strip().splitlines()[-10:]:

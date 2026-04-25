@@ -31,6 +31,7 @@ We train with GRPO (Unsloth + TRL) in Colab and evaluate:
 - root-cause accuracy
 - long-horizon consistency
 - structured behavior diffs
+- explicit policy provenance via `policy_used` (`trained_checkpoint` vs `trained_heuristic`)
 
 Quick local smoke:
 
@@ -46,7 +47,7 @@ python evaluate.py --policy compare \
   --compare-trained-policy trained_checkpoint \
   --checkpoint-dir artifacts/train/trained_adapter \
   --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
-  --episodes-per-difficulty 5 --plot --output-dir artifacts/eval_compare_ckpt
+  --episodes-per-difficulty 5 --plot --output-dir artifacts/eval
 ```
 
 ## Reproducibility note
@@ -55,6 +56,6 @@ Run at least two seeds and report mean ± std on key metrics for final submissio
 
 ---
 
-HF Space: TODO_ADD_SPACE_URL  
-GitHub: TODO_ADD_REPO_URL  
+HF Space: https://huggingface.co/spaces/Anuj2209/openenv-customer-support  
+GitHub: https://github.com/anujkamaljain/OpenEnv-Customer-Support  
 Video (<2 min): TODO_ADD_YOUTUBE_URL

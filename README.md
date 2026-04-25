@@ -32,7 +32,7 @@ EICC is a deterministic OpenEnv environment that trains LLM agents to behave lik
 1. **Problem (why it matters):** Most LLM benchmarks test isolated skills. Real enterprise incidents require partial observability, causal reasoning, long-horizon execution, and tool orchestration.
 2. **Environment:** 21 typed actions across 4 incident phases, 5-service causal mesh, 8 enterprise tools, 18 hand-crafted scenarios, deterministic reward (no LLM judge).
 3. **Training:** GRPO on Qwen2.5-3B via Unsloth + HF TRL in Colab. Reward includes strict JSON-shape, phase-availability, investigation-before-action, KB cross-verification, policy awareness, and trajectory-grounded action values. Concise-output and cap-hit penalties prevent reward hacking.
-4. **Evidence:** `evaluate.py` produces dual-panel reward curves (normalized + raw), per-difficulty breakdown, root-cause accuracy, 8 tracked behavioral skills, and a machine-readable `trained_report.json` that now records `policy_used` (checkpoint vs heuristic fallback) so judges can tell exactly which policy produced the numbers.
+4. **Evidence:** `evaluate.py` produces dual-panel reward curves (normalized + raw), per-difficulty breakdown, root-cause accuracy, 8 tracked behavioral skills, and a machine-readable `trained_report.json` that records `policy_used` (`trained_checkpoint` vs `trained_heuristic` fallback) so judges can see exactly which policy produced each run.
 
 ### Judging criteria mapping (40 / 30 / 20 / 10)
 
@@ -61,7 +61,8 @@ Open `train_notebook.ipynb` and run in order:
 | 7–8 | Inspect reports and plot | instant |
 | 9–10 | (Optional) two-seed reproducibility | 2× Step 5 time |
 
-Artifacts land in `artifacts/...` and can be downloaded from the Colab file browser.
+Artifacts land in `artifacts/...` and can be downloaded from the Colab file browser.  
+Step 5 also writes an internal checkpoint-eval snapshot under `artifacts/train/checkpoint_eval/`; Step 6 writes judge-facing compare outputs under `artifacts/eval/`.
 
 ---
 
@@ -154,7 +155,7 @@ python evaluate.py --policy compare \
   --compare-trained-policy trained_checkpoint \
   --checkpoint-dir artifacts/train/trained_adapter \
   --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
-  --episodes-per-difficulty 5 --plot --output-dir artifacts/eval_compare_ckpt
+  --episodes-per-difficulty 5 --plot --output-dir artifacts/eval
 ```
 
 ---
@@ -181,7 +182,7 @@ When you run the full Colab notebook end-to-end on a T4:
 - Training output: `artifacts/train/trained_adapter/`
 - Evaluation output: `artifacts/eval/reward_curves.png`, `baseline_report.json`, `trained_report.json`
 
-> **`policy_used` field:** both `baseline_report.json` and `trained_report.json` now include a `policy_used` field so you can confirm whether the trained-side numbers came from the **real Qwen LoRA checkpoint** (`trained_checkpoint`) or from the **deterministic heuristic fallback** (`trained_heuristic`) that activates if checkpoint loading fails. Console logs also print this.
+> **`policy_used` field:** both `baseline_report.json` and `trained_report.json` include `policy_used` so you can confirm whether trained-side numbers came from the **real Qwen LoRA checkpoint** (`trained_checkpoint`) or the **deterministic heuristic fallback** (`trained_heuristic`). We keep this explicit in logs/reports for transparency.
 
 ---
 

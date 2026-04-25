@@ -21,6 +21,7 @@
 
   Agent loop:
     Observation -> Action -> Environment transition -> Reward -> Next observation
+    (evaluation logs `policy_used` for checkpoint/fallback provenance)
 
   Incident phases:
     TRIAGE -> INVESTIGATION -> RESPONSE -> RESOLUTION

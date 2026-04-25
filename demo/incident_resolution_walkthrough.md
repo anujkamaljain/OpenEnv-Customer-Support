@@ -14,8 +14,8 @@
    - Correctly sets urgency for customer/business impact.
 3. `probe_service` (`database`, `resources`)  
    - Confirms resource exhaustion signal.
-4. `apply_fix` (`database`, `memory_increase`)  
-   - Root-cause fix succeeds.
+4. `apply_fix` (`database`, `<root-cause-aligned fix_type>`)  
+   - Fix type is selected from gathered evidence (not hardcoded).
 5. `verify_fix` (`database`)  
    - Service returns `healthy`; dependent services recover.
 6. `notify_stakeholders` (`all`)  
@@ -26,6 +26,12 @@
    - Ticket closure with verified remediation summary.
 9. `write_postmortem`  
    - Captures root cause, remediation, prevention measures.
+
+## Evaluation Transparency
+
+- In report artifacts, `policy_used` explicitly records whether behavior came from
+  `trained_checkpoint` or `trained_heuristic`.
+- Guarded fallback is intentional and visible, so benchmark numbers are auditable.
 
 ## Why This Matters
 

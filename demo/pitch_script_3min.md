@@ -41,6 +41,8 @@ Pipeline: collect trajectories from the environment, train adapter, then evaluat
 
 "Key behavior shift: trained policy checks monitoring and policy earlier, verifies evidence, and executes resolution steps more consistently."
 
+"And we report policy provenance explicitly. In every run, `policy_used` tells judges whether the trained number came from the real checkpoint or a guarded fallback."
+
 ### 2:20-2:45 — Why this is novel
 
 "This is not a toy grid world. It is a partially observable, multi-app enterprise workflow where naive reward hacking fails.  
