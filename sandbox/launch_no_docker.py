@@ -75,7 +75,15 @@ def _serve(name: str, app, port: int) -> Callable[[], None]:
 
     thread = threading.Thread(target=_runner, name=f"sandbox-{name}", daemon=True)
     thread.start()
-    return server.should_exit.set if hasattr(server, "should_exit") else (lambda: None)
+
+    def _stop() -> None:
+        # uvicorn Server.should_exit is a bool in current releases.
+        server.should_exit = True
+        # Best-effort hard stop if graceful shutdown stalls.
+        if hasattr(server, "force_exit"):
+            server.force_exit = True
+
+    return _stop
 
 
 def main() -> None:
