@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: "sandbox-auth"
+    static_configs:
+      - targets: ["auth:5001"]
+    metrics_path: /metrics
+  - job_name: "sandbox-database"
+    static_configs:
+      - targets: ["database:5002"]
+    metrics_path: /metrics
+  - job_name: "sandbox-payments"
+    static_configs:
+      - targets: ["payments:5003"]
+    metrics_path: /metrics
+  - job_name: "sandbox-analytics"
+    static_configs:
+      - targets: ["analytics:5004"]
+    metrics_path: /metrics
+  - job_name: "sandbox-notifications"
+    static_configs:
+      - targets: ["notifications:5005"]
+    metrics_path: /metrics
+

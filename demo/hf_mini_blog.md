@@ -32,6 +32,8 @@ We train with GRPO (Unsloth + TRL) in Colab and evaluate:
 - long-horizon consistency
 - structured behavior diffs
 - explicit policy provenance via `policy_used` (`trained_checkpoint` vs `trained_heuristic`)
+- Sim→Sandbox transfer report (`transfer_report.json`) to quantify backend transfer
+- Failure Curriculum Drill Mode (`drill_score`) for mid-episode disruption recovery
 
 Quick local smoke:
 
@@ -48,6 +50,29 @@ python evaluate.py --policy compare \
   --checkpoint-dir artifacts/train/trained_adapter \
   --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
   --episodes-per-difficulty 5 --plot --output-dir artifacts/eval
+```
+
+Transfer evaluation (simulated + sandbox):
+
+```bash
+python evaluate.py --policy compare \
+  --compare-trained-policy trained_checkpoint \
+  --checkpoint-dir artifacts/train/trained_adapter \
+  --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
+  --episodes-per-difficulty 1 \
+  --transfer-report --output-dir artifacts/eval_transfer
+```
+
+Transfer + drill benchmark:
+
+```bash
+python evaluate.py --policy compare \
+  --compare-trained-policy trained_checkpoint \
+  --checkpoint-dir artifacts/train/trained_adapter \
+  --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
+  --episodes-per-difficulty 1 \
+  --transfer-report --sandbox-drill-mode --sandbox-drill-seed 7 \
+  --output-dir artifacts/eval_transfer_drill
 ```
 
 ## Reproducibility note

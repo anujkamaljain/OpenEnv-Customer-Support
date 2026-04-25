@@ -23,6 +23,13 @@
     Observation -> Action -> Environment transition -> Reward -> Next observation
     (evaluation logs `policy_used` for checkpoint/fallback provenance)
 
+  Dual-backend evaluation:
+    Simulated backend (official deterministic score)
+    Sandbox backend (live container cluster)
+    -> transfer_report.json quantifies sim->sandbox skill transfer
+    -> optional drill mode injects deterministic mid-episode failures
+       and logs drill_score for response quality under fresh disruptions
+
   Incident phases:
     TRIAGE -> INVESTIGATION -> RESPONSE -> RESOLUTION
 ```

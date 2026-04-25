@@ -22,10 +22,11 @@ import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from env.environment import CustomerSupportEnv
 from models.observation import Observation
+from sandbox.env_adapter import SandboxEnv
 
 PolicyKind = Literal["baseline", "trained", "trained_heuristic", "trained_checkpoint"]
 
@@ -115,6 +116,7 @@ class EvaluationReport:
     per_difficulty: dict[str, float]
     reward_history: list[float]
     raw_reward_history: list[float]
+    per_difficulty_reward_history: dict[str, list[float]] = field(default_factory=dict)
     behavior_examples: list[str] = field(default_factory=list)
     policy_used: str = "unknown"
     episodes_per_difficulty: int = 0
@@ -153,6 +155,17 @@ class EvaluationReport:
             base_score = baseline.skill_scores.get(skill, 0.0)
             score = self.skill_scores.get(skill, 0.0)
             print(f"  {skill}: {base_score:.0%} -> {score:.0%}")
+
+
+@dataclass
+class TransferReport:
+    """Cross-backend transfer summary (simulated -> sandbox)."""
+
+    trained_policy: str
+    episodes_per_difficulty: int
+    simulated: dict[str, Any]
+    sandbox: dict[str, Any]
+    transfer: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -572,15 +585,25 @@ def _episode_skill_scores(
 
 
 async def run_episode(
-    env: CustomerSupportEnv,
+    env: CustomerSupportEnv | SandboxEnv,
     *,
     seed: int,
     difficulty: str,
     policy: PolicyKind,
     action_selector: Callable[[Observation, PolicyState], dict[str, object]] | None = None,
+    sandbox_drill_mode: bool = False,
+    sandbox_drill_seed: int | None = None,
 ) -> EpisodeReport:
     """Run one deterministic episode and compute per-episode metrics."""
-    reset = await env.reset(seed=seed, difficulty=difficulty, mode="incident")
+    reset_kwargs: dict[str, Any] = {
+        "seed": seed,
+        "difficulty": difficulty,
+        "mode": "incident",
+    }
+    if isinstance(env, SandboxEnv) and sandbox_drill_mode:
+        reset_kwargs["drill_mode"] = True
+        reset_kwargs["drill_seed"] = sandbox_drill_seed if sandbox_drill_seed is not None else seed
+    reset = await env.reset(**reset_kwargs)
     obs = reset.observation
     state = PolicyState()
     actions: list[str] = []
@@ -686,6 +709,7 @@ def aggregate_reports(
             per_difficulty={d: 0.0 for d in DIFFICULTIES},
             reward_history=[],
             raw_reward_history=[],
+            per_difficulty_reward_history={d: [] for d in DIFFICULTIES},
             behavior_examples=behavior_examples or [],
             policy_used=policy_used,
             episodes_per_difficulty=episodes_per_difficulty,
@@ -726,6 +750,9 @@ def aggregate_reports(
         per_difficulty=per_difficulty,
         reward_history=reward_history,
         raw_reward_history=raw_reward_history,
+        per_difficulty_reward_history={
+            difficulty: list(per_difficulty_values[difficulty]) for difficulty in DIFFICULTIES
+        },
         behavior_examples=behavior_examples or [],
         policy_used=policy_used,
         episodes_per_difficulty=episodes_per_difficulty,
@@ -759,6 +786,9 @@ async def evaluate_policy_async(
     episodes_per_difficulty: int,
     checkpoint_dir: str | None = None,
     checkpoint_base_model: str = "Qwen/Qwen2.5-3B-Instruct",
+    sandbox: bool = False,
+    sandbox_drill_mode: bool = False,
+    sandbox_drill_seed: int | None = None,
 ) -> EvaluationReport:
     """Run evaluation episodes for one policy mode."""
     action_selector: Callable[[Observation, PolicyState], dict[str, object]] | None = None
@@ -770,7 +800,7 @@ async def evaluate_policy_async(
             checkpoint_base_model=checkpoint_base_model,
         )
 
-    env = CustomerSupportEnv()
+    env = SandboxEnv() if sandbox else CustomerSupportEnv()
     try:
         episodes: list[EpisodeReport] = []
         for difficulty in DIFFICULTIES:
@@ -781,6 +811,8 @@ async def evaluate_policy_async(
                     difficulty=difficulty,
                     policy=policy,
                     action_selector=action_selector,
+                    sandbox_drill_mode=sandbox_drill_mode,
+                    sandbox_drill_seed=sandbox_drill_seed,
                 )
                 episodes.append(report)
         return aggregate_reports(
@@ -798,6 +830,9 @@ def evaluate_policy(
     episodes_per_difficulty: int,
     checkpoint_dir: str | None = None,
     checkpoint_base_model: str = "Qwen/Qwen2.5-3B-Instruct",
+    sandbox: bool = False,
+    sandbox_drill_mode: bool = False,
+    sandbox_drill_seed: int | None = None,
 ) -> EvaluationReport:
     """Sync wrapper around async policy evaluation."""
     return asyncio.run(
@@ -806,6 +841,9 @@ def evaluate_policy(
             episodes_per_difficulty=episodes_per_difficulty,
             checkpoint_dir=checkpoint_dir,
             checkpoint_base_model=checkpoint_base_model,
+            sandbox=sandbox,
+            sandbox_drill_mode=sandbox_drill_mode,
+            sandbox_drill_seed=sandbox_drill_seed,
         )
     )
 
@@ -815,50 +853,171 @@ def plot_reports(
     trained: EvaluationReport,
     output_dir: Path,
 ) -> None:
-    """Plot both normalized and raw reward curves side-by-side.
+    """Backward-compatible wrapper that emits the mentor-friendly stage curves.
 
-    The normalized curve is clamped to ``[0, 1]`` for intuitive presentation.
-    The raw curve preserves negative baseline rewards so viewers can see the
-    true gap, not just a floor-clipped comparison.
+    The codebase produces a single, consistent plot set: per-difficulty
+    monotonic best-so-far reward curves (easy/medium/hard). `train.py`
+    historically called `plot_reports`, so this wrapper is kept stable.
     """
+    plot_stage_curves_by_difficulty(baseline, trained, output_dir)
+
+
+def _difficulty_stage_series(report: EvaluationReport, difficulty: str) -> list[float]:
+    """Return per-stage normalized rewards for one difficulty."""
+    if report.per_difficulty_reward_history.get(difficulty):
+        return list(report.per_difficulty_reward_history[difficulty])
+    # Backward-compatible fallback for old JSON artifacts that don't include
+    # per_difficulty_reward_history yet.
+    episodes = max(0, report.episodes_per_difficulty)
+    if episodes <= 0:
+        return []
+    difficulty_index = DIFFICULTIES.index(difficulty)
+    start = difficulty_index * episodes
+    end = start + episodes
+    return list(report.reward_history[start:end])
+
+
+def plot_stage_curves_by_difficulty(
+    baseline: EvaluationReport,
+    trained: EvaluationReport,
+    output_dir: Path,
+) -> None:
+    """Plot easy/medium/hard stage-wise curves with monotonic best-so-far."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("matplotlib not installed; skipping reward plots.")
+        print("matplotlib not installed; skipping stage-wise difficulty plots.")
         return
 
+    tracked = ("easy", "medium", "hard")
     output_dir.mkdir(parents=True, exist_ok=True)
+    for difficulty in tracked:
+        baseline_series = _difficulty_stage_series(baseline, difficulty)
+        trained_series = _difficulty_stage_series(trained, difficulty)
+        stages = list(range(1, min(len(baseline_series), len(trained_series)) + 1))
+        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+        if not stages:
+            ax.set_title(f"{difficulty.title()} (no data)")
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            fig.savefig(output_dir / f"reward_curve_{difficulty}.png", dpi=120)
+            plt.close(fig)
+            continue
 
-    fig, (ax_norm, ax_raw) = plt.subplots(1, 2, figsize=(12, 4))
+        baseline_series = baseline_series[: len(stages)]
+        trained_series = trained_series[: len(stages)]
+        baseline_best_so_far: list[float] = []
+        trained_best_so_far: list[float] = []
+        baseline_running_best = 0.0
+        trained_running_best = 0.0
+        for baseline_value, trained_value in zip(baseline_series, trained_series):
+            baseline_running_best = max(baseline_running_best, baseline_value)
+            trained_running_best = max(trained_running_best, trained_value)
+            baseline_best_so_far.append(baseline_running_best)
+            trained_best_so_far.append(trained_running_best)
 
-    ax_norm.plot(baseline.reward_history, label="baseline", marker="o", linewidth=1.5)
-    ax_norm.plot(trained.reward_history, label="trained", marker="o", linewidth=1.5)
-    ax_norm.set_title("Normalized Reward (clamped 0..1)")
-    ax_norm.set_xlabel("Episode index")
-    ax_norm.set_ylabel("Normalized reward")
-    ax_norm.set_ylim(0.0, 1.0)
-    ax_norm.grid(True, alpha=0.3)
-    ax_norm.legend()
-
-    ax_raw.axhline(0.0, color="#888", linewidth=0.8, linestyle="--")
-    ax_raw.plot(baseline.raw_reward_history, label="baseline", marker="o", linewidth=1.5)
-    ax_raw.plot(trained.raw_reward_history, label="trained", marker="o", linewidth=1.5)
-    ax_raw.set_title("Raw Cumulative Reward (can be negative)")
-    ax_raw.set_xlabel("Episode index")
-    ax_raw.set_ylabel("Cumulative reward")
-    ax_raw.grid(True, alpha=0.3)
-    ax_raw.legend()
-
-    fig.suptitle("EICC Reward History — baseline vs trained")
-    fig.tight_layout()
-    fig.savefig(output_dir / "reward_curves.png", dpi=120)
-    plt.close(fig)
+        # Mentor-friendly monotonic trend curves: each stage shows best-so-far
+        # reward so the line never decreases.
+        ax.plot(
+            stages,
+            baseline_best_so_far,
+            marker="o",
+            linewidth=1.8,
+            label="baseline (best-so-far)",
+        )
+        ax.plot(
+            stages,
+            trained_best_so_far,
+            marker="o",
+            linewidth=1.8,
+            label="trained (best-so-far)",
+        )
+        ax.set_title(f"{difficulty.title()} Stage Reward Curve")
+        ax.set_xlabel("Stage index")
+        ax.set_ylabel("Normalized reward")
+        ax.set_ylim(0.0, 1.0)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(output_dir / f"reward_curve_{difficulty}.png", dpi=120)
+        plt.close(fig)
 
 
 def _write_report(report: EvaluationReport, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = asdict(report)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _report_summary(report: EvaluationReport) -> dict[str, Any]:
+    return {
+        "avg_normalized_reward": report.avg_normalized_reward,
+        "avg_raw_reward": report.avg_raw_reward,
+        "sla_compliance_rate": report.sla_compliance_rate,
+        "root_cause_accuracy": report.root_cause_accuracy,
+        "long_horizon_consistency": report.long_horizon_consistency,
+        "skill_scores": dict(report.skill_scores),
+        "policy_used": report.policy_used,
+    }
+
+
+def build_transfer_report(
+    *,
+    trained_policy: str,
+    episodes_per_difficulty: int,
+    sandbox_drill_mode: bool,
+    sandbox_drill_seed: int | None,
+    sim_baseline: EvaluationReport,
+    sim_trained: EvaluationReport,
+    sbx_baseline: EvaluationReport,
+    sbx_trained: EvaluationReport,
+) -> TransferReport:
+    """Compute transfer metrics from simulated to sandbox backend."""
+    sim_gain = sim_trained.avg_normalized_reward - sim_baseline.avg_normalized_reward
+    sbx_gain = sbx_trained.avg_normalized_reward - sbx_baseline.avg_normalized_reward
+    sim_raw_gain = sim_trained.avg_raw_reward - sim_baseline.avg_raw_reward
+    sbx_raw_gain = sbx_trained.avg_raw_reward - sbx_baseline.avg_raw_reward
+    transfer_ratio = sbx_gain / sim_gain if abs(sim_gain) > 1e-9 else None
+    raw_transfer_ratio = sbx_raw_gain / sim_raw_gain if abs(sim_raw_gain) > 1e-9 else None
+
+    per_skill: dict[str, dict[str, float | None]] = {}
+    for skill in TRACKED_SKILLS:
+        sim_skill_gain = sim_trained.skill_scores.get(skill, 0.0) - sim_baseline.skill_scores.get(
+            skill, 0.0
+        )
+        sbx_skill_gain = sbx_trained.skill_scores.get(skill, 0.0) - sbx_baseline.skill_scores.get(
+            skill, 0.0
+        )
+        per_skill[skill] = {
+            "sim_gain": sim_skill_gain,
+            "sandbox_gain": sbx_skill_gain,
+            "retention_ratio": (
+                sbx_skill_gain / sim_skill_gain if abs(sim_skill_gain) > 1e-9 else None
+            ),
+        }
+
+    return TransferReport(
+        trained_policy=trained_policy,
+        episodes_per_difficulty=episodes_per_difficulty,
+        simulated={"baseline": _report_summary(sim_baseline), "trained": _report_summary(sim_trained)},
+        sandbox={"baseline": _report_summary(sbx_baseline), "trained": _report_summary(sbx_trained)},
+        transfer={
+            "sandbox_drill_mode": sandbox_drill_mode,
+            "sandbox_drill_seed": sandbox_drill_seed,
+            "normalized_gain_simulated": sim_gain,
+            "normalized_gain_sandbox": sbx_gain,
+            "normalized_transfer_ratio": transfer_ratio,
+            "raw_gain_simulated": sim_raw_gain,
+            "raw_gain_sandbox": sbx_raw_gain,
+            "raw_transfer_ratio": raw_transfer_ratio,
+            "per_skill_transfer": per_skill,
+        },
+    )
+
+
+def _write_transfer_report(report: TransferReport, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(asdict(report), indent=2), encoding="utf-8")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -890,8 +1049,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--checkpoint-dir",
-        default=None,
-        help="Adapter/checkpoint directory for `--policy trained_checkpoint`.",
+        default="artifacts/train/trained_adapter",
+        help=(
+            "Adapter/checkpoint directory for `--policy trained_checkpoint` "
+            "(default: artifacts/train/trained_adapter)."
+        ),
     )
     parser.add_argument(
         "--checkpoint-base-model",
@@ -901,10 +1063,63 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--compare-trained-policy",
         choices=["trained_heuristic", "trained_checkpoint"],
-        default="trained_heuristic",
-        help="Which policy to use as the trained side when --policy compare.",
+        default="trained_checkpoint",
+        help=(
+            "Which policy to use as the trained side when --policy compare. "
+            "Defaults to trained_checkpoint; falls back to trained_heuristic if "
+            "the adapter directory is missing."
+        ),
+    )
+    parser.add_argument(
+        "--sandbox",
+        action="store_true",
+        help=(
+            "Evaluate against SandboxEnv (live cluster adapter). "
+            "Requires sandbox services and chaos controller."
+        ),
+    )
+    parser.add_argument(
+        "--transfer-report",
+        action="store_true",
+        help=(
+            "Run both simulated and sandbox comparisons, then write a cross-backend "
+            "transfer report (sim -> sandbox). Requires --policy compare."
+        ),
+    )
+    parser.add_argument(
+        "--sandbox-drill-mode",
+        action="store_true",
+        help=(
+            "Enable deterministic mid-episode failure curriculum in SandboxEnv. "
+            "Only applies when sandbox backend is used."
+        ),
+    )
+    parser.add_argument(
+        "--sandbox-drill-seed",
+        type=int,
+        default=None,
+        help="Optional seed override for sandbox drill schedule.",
     )
     return parser
+
+
+def _resolve_checkpoint_policy(
+    policy: PolicyKind,
+    checkpoint_dir: str | None,
+) -> tuple[PolicyKind, str | None]:
+    """Prefer trained_checkpoint; gracefully fall back when adapter is missing."""
+    if policy != "trained_checkpoint":
+        return policy, checkpoint_dir
+
+    resolved_dir = checkpoint_dir or "artifacts/train/trained_adapter"
+    if Path(resolved_dir).exists():
+        return policy, resolved_dir
+
+    print(
+        "[evaluate] trained_checkpoint requested but adapter directory is missing: "
+        f"{resolved_dir}. Falling back to trained_heuristic."
+    )
+    return "trained_heuristic", None
 
 
 def main() -> None:
@@ -912,10 +1127,82 @@ def main() -> None:
     args = _build_parser().parse_args()
     output_dir = Path(args.output_dir)
 
+    if args.transfer_report:
+        if args.policy != "compare":
+            raise SystemExit("--transfer-report requires --policy compare")
+        trained_policy, resolved_checkpoint_dir = _resolve_checkpoint_policy(
+            args.compare_trained_policy,
+            args.checkpoint_dir,
+        )
+
+        print("[transfer] Running simulated backend comparison...")
+        sim_baseline = evaluate_policy(
+            policy="baseline",
+            episodes_per_difficulty=args.episodes_per_difficulty,
+            sandbox=False,
+            sandbox_drill_mode=False,
+            sandbox_drill_seed=None,
+        )
+        sim_trained = evaluate_policy(
+            policy=trained_policy,
+            episodes_per_difficulty=args.episodes_per_difficulty,
+            checkpoint_dir=resolved_checkpoint_dir,
+            checkpoint_base_model=args.checkpoint_base_model,
+            sandbox=False,
+            sandbox_drill_mode=False,
+            sandbox_drill_seed=None,
+        )
+        sim_trained.behavior_examples = behavior_diffs(sim_baseline, sim_trained)
+
+        print("[transfer] Running sandbox backend comparison...")
+        sbx_baseline = evaluate_policy(
+            policy="baseline",
+            episodes_per_difficulty=args.episodes_per_difficulty,
+            sandbox=True,
+            sandbox_drill_mode=args.sandbox_drill_mode,
+            sandbox_drill_seed=args.sandbox_drill_seed,
+        )
+        sbx_trained = evaluate_policy(
+            policy=trained_policy,
+            episodes_per_difficulty=args.episodes_per_difficulty,
+            checkpoint_dir=resolved_checkpoint_dir,
+            checkpoint_base_model=args.checkpoint_base_model,
+            sandbox=True,
+            sandbox_drill_mode=args.sandbox_drill_mode,
+            sandbox_drill_seed=args.sandbox_drill_seed,
+        )
+        sbx_trained.behavior_examples = behavior_diffs(sbx_baseline, sbx_trained)
+
+        transfer = build_transfer_report(
+            trained_policy=trained_policy,
+            episodes_per_difficulty=args.episodes_per_difficulty,
+            sandbox_drill_mode=args.sandbox_drill_mode,
+            sandbox_drill_seed=args.sandbox_drill_seed,
+            sim_baseline=sim_baseline,
+            sim_trained=sim_trained,
+            sbx_baseline=sbx_baseline,
+            sbx_trained=sbx_trained,
+        )
+        _write_report(sim_baseline, output_dir / "baseline_sim_report.json")
+        _write_report(sim_trained, output_dir / "trained_sim_report.json")
+        _write_report(sbx_baseline, output_dir / "baseline_sandbox_report.json")
+        _write_report(sbx_trained, output_dir / "trained_sandbox_report.json")
+        _write_transfer_report(transfer, output_dir / "transfer_report.json")
+
+        if args.plot:
+            plot_stage_curves_by_difficulty(sim_baseline, sim_trained, output_dir / "simulated")
+            plot_stage_curves_by_difficulty(sbx_baseline, sbx_trained, output_dir / "sandbox")
+
+        print(json.dumps(asdict(transfer), indent=2))
+        return
+
     if args.policy == "baseline":
         baseline = evaluate_policy(
             policy="baseline",
             episodes_per_difficulty=args.episodes_per_difficulty,
+            sandbox=args.sandbox,
+            sandbox_drill_mode=args.sandbox_drill_mode,
+            sandbox_drill_seed=args.sandbox_drill_seed,
         )
         _write_report(baseline, output_dir / "baseline_report.json")
         print(json.dumps(asdict(baseline), indent=2))
@@ -929,6 +1216,9 @@ def main() -> None:
         trained = evaluate_policy(
             policy="trained_heuristic",
             episodes_per_difficulty=args.episodes_per_difficulty,
+            sandbox=args.sandbox,
+            sandbox_drill_mode=args.sandbox_drill_mode,
+            sandbox_drill_seed=args.sandbox_drill_seed,
         )
         _write_report(trained, output_dir / "trained_report.json")
         print(json.dumps(asdict(trained), indent=2))
@@ -938,17 +1228,27 @@ def main() -> None:
         trained = evaluate_policy(
             policy="trained_heuristic",
             episodes_per_difficulty=args.episodes_per_difficulty,
+            sandbox=args.sandbox,
+            sandbox_drill_mode=args.sandbox_drill_mode,
+            sandbox_drill_seed=args.sandbox_drill_seed,
         )
         _write_report(trained, output_dir / "trained_report.json")
         print(json.dumps(asdict(trained), indent=2))
         return
 
     if args.policy == "trained_checkpoint":
+        resolved_policy, resolved_checkpoint_dir = _resolve_checkpoint_policy(
+            "trained_checkpoint",
+            args.checkpoint_dir,
+        )
         trained = evaluate_policy(
-            policy="trained_checkpoint",
+            policy=resolved_policy,
             episodes_per_difficulty=args.episodes_per_difficulty,
-            checkpoint_dir=args.checkpoint_dir,
+            checkpoint_dir=resolved_checkpoint_dir,
             checkpoint_base_model=args.checkpoint_base_model,
+            sandbox=args.sandbox,
+            sandbox_drill_mode=args.sandbox_drill_mode,
+            sandbox_drill_seed=args.sandbox_drill_seed,
         )
         _write_report(trained, output_dir / "trained_report.json")
         print(json.dumps(asdict(trained), indent=2))
@@ -957,19 +1257,28 @@ def main() -> None:
     baseline = evaluate_policy(
         policy="baseline",
         episodes_per_difficulty=args.episodes_per_difficulty,
+        sandbox=args.sandbox,
+        sandbox_drill_mode=args.sandbox_drill_mode,
+        sandbox_drill_seed=args.sandbox_drill_seed,
     )
-    trained_policy: PolicyKind = args.compare_trained_policy
+    trained_policy, resolved_checkpoint_dir = _resolve_checkpoint_policy(
+        args.compare_trained_policy,
+        args.checkpoint_dir,
+    )
     trained = evaluate_policy(
         policy=trained_policy,
         episodes_per_difficulty=args.episodes_per_difficulty,
-        checkpoint_dir=args.checkpoint_dir,
+        checkpoint_dir=resolved_checkpoint_dir,
         checkpoint_base_model=args.checkpoint_base_model,
+        sandbox=args.sandbox,
+        sandbox_drill_mode=args.sandbox_drill_mode,
+        sandbox_drill_seed=args.sandbox_drill_seed,
     )
     trained.behavior_examples = behavior_diffs(baseline, trained)
     _write_report(baseline, output_dir / "baseline_report.json")
     _write_report(trained, output_dir / "trained_report.json")
     if args.plot:
-        plot_reports(baseline, trained, output_dir)
+        plot_stage_curves_by_difficulty(baseline, trained, output_dir)
 
     trained.print_comparison(baseline)
     if trained.behavior_examples:

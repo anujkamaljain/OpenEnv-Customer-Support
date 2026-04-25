@@ -33,4 +33,4 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.hatch.build.targets.wheel]
-packages = ["env", "models", "tasks", "graders", "server"]
+packages = ["env", "models", "tasks", "graders", "server", "sandbox"]

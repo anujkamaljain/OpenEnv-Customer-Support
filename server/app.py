@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from env.environment import CustomerSupportEnv
 from models.action import Action
+from sandbox.env_adapter import SandboxEnv
 
 _OPENAPI_TAGS = [
     {
@@ -63,7 +64,19 @@ _API_KEY = os.environ.get("OPENENV_API_KEY", "").strip()
 _RATE_LIMIT_PER_MIN = int(os.environ.get("OPENENV_RATE_LIMIT_PER_MIN", "120"))
 _AUDIT_LOG_PATH = os.environ.get("OPENENV_AUDIT_LOG_PATH", "").strip()
 _AUTH_EXEMPT_PATHS = frozenset(["/", "/docs", "/openapi.json", "/redoc", "/health"])
-_SESSION_ENVS: dict[str, CustomerSupportEnv] = {_DEFAULT_SESSION_ID: CustomerSupportEnv()}
+EnvLike = CustomerSupportEnv | SandboxEnv
+_USE_SANDBOX = os.environ.get("OPENENV_SANDBOX", "false").strip().lower() in {"1", "true", "yes", "on"}
+_SANDBOX_CLUSTER_URL = os.environ.get("OPENENV_SANDBOX_CLUSTER_URL", "http://localhost").strip()
+_SANDBOX_CHAOS_URL = os.environ.get("OPENENV_SANDBOX_CHAOS_URL", "http://localhost:6660").strip()
+
+
+def _create_env() -> EnvLike:
+    if _USE_SANDBOX:
+        return SandboxEnv(cluster_base_url=_SANDBOX_CLUSTER_URL, chaos_url=_SANDBOX_CHAOS_URL)
+    return CustomerSupportEnv()
+
+
+_SESSION_ENVS: dict[str, EnvLike] = {_DEFAULT_SESSION_ID: _create_env()}
 _RATE_LIMIT_WINDOWS: dict[str, deque[float]] = defaultdict(deque)
 
 
@@ -84,10 +97,10 @@ def _audit_event(payload: dict[str, Any]) -> None:
             handle.write(line + "\n")
 
 
-async def _get_env(session_id: str, *, create_if_missing: bool = True) -> CustomerSupportEnv:
+async def _get_env(session_id: str, *, create_if_missing: bool = True) -> EnvLike:
     env = _SESSION_ENVS.get(session_id)
     if env is None and create_if_missing:
-        env = CustomerSupportEnv()
+        env = _create_env()
         _SESSION_ENVS[session_id] = env
     if env is None:
         raise HTTPException(status_code=404, detail=f"Unknown session_id '{session_id}'")
@@ -158,6 +171,13 @@ class ResetRequest(BaseModel):
                 {"seed": 0, "difficulty": "easy", "mode": "ticket"},
                 {"seed": 0, "difficulty": "easy", "mode": "incident"},
                 {"seed": 0, "difficulty": "nightmare", "mode": "incident"},
+                {
+                    "seed": 0,
+                    "difficulty": "hard",
+                    "mode": "incident",
+                    "drill_mode": True,
+                    "drill_seed": 7,
+                },
                 {"seed": 0, "difficulty": None, "mode": "ticket"},
             ]
         }
@@ -181,6 +201,17 @@ class ResetRequest(BaseModel):
     session_id: str | None = Field(
         default=None,
         description="Optional episode session key. If omitted, uses the default shared session.",
+    )
+    drill_mode: bool = Field(
+        default=False,
+        description=(
+            "Sandbox-only: enable deterministic failure curriculum drill events "
+            "during incident episodes."
+        ),
+    )
+    drill_seed: int | None = Field(
+        default=None,
+        description="Sandbox-only deterministic seed override for drill schedule.",
     )
 
 
@@ -758,6 +789,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
     <div class="panel">
       <div class="hint-bar">
         Choose <strong>mode</strong> on reset: <strong>ticket</strong> for legacy triage or <strong>incident</strong> for EICC workflow.
+        In sandbox mode, optional <strong>drill mode</strong> injects deterministic mid-episode failures.
         Use <strong>Get state</strong> to inspect <code>available_actions</code>; unavailable actions are auto-disabled after reset/step.
       </div>
       <h2>Step-by-step action</h2>
@@ -1123,6 +1155,17 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
           <label for="resetSeed">Reset · seed</label>
           <input type="number" id="resetSeed" value="0" step="1" />
         </div>
+        <div>
+          <label for="resetDrillMode">Reset · drill mode (sandbox)</label>
+          <select id="resetDrillMode">
+            <option value="false" selected>disabled</option>
+            <option value="true">enabled</option>
+          </select>
+        </div>
+        <div>
+          <label for="resetDrillSeed">Reset · drill seed <span class="hint">(optional)</span></label>
+          <input type="number" id="resetDrillSeed" step="1" placeholder="uses reset seed if empty" />
+        </div>
       </div>
 
       <div class="btn-row">
@@ -1375,7 +1418,7 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
    "runbookId", "runbookStepIdx", "fixService", "fixType", "verifyService",
    "rollbackService", "notifyStakeholder", "notifyMessage", "notifyUrgency",
    "pmSummary", "pmRootCause", "pmRemediation", "pmPrevention", "kbTitle",
-   "kbContent", "kbTags"].forEach((id) => {
+   "kbContent", "kbTags", "resetDrillMode", "resetDrillSeed"].forEach((id) => {
     const el = $(id);
     if (el) el.addEventListener("input", syncJsonPreview);
     if (el) el.addEventListener("change", syncJsonPreview);
@@ -1592,10 +1635,24 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
   function syncDifficultyByMode() {
     const mode = $("resetMode").value;
     const difficulty = $("resetDifficulty");
+    const drillMode = $("resetDrillMode");
+    const drillSeed = $("resetDrillSeed");
     const nightmare = difficulty.querySelector('option[value="nightmare"]');
     if (nightmare) nightmare.disabled = mode !== "incident";
     if (mode !== "incident" && difficulty.value === "nightmare") {
       difficulty.value = "";
+    }
+    if (drillMode) {
+      drillMode.disabled = mode !== "incident";
+      if (mode !== "incident") {
+        drillMode.value = "false";
+      }
+    }
+    if (drillSeed) {
+      drillSeed.disabled = mode !== "incident";
+      if (mode !== "incident") {
+        drillSeed.value = "";
+      }
     }
   }
 
@@ -1671,11 +1728,18 @@ _DEBUG_UI_HTML = """<!DOCTYPE html>
     const seedRaw = parseInt($("resetSeed").value, 10);
     const seed = Number.isFinite(seedRaw) ? seedRaw : 0;
     const diff = $("resetDifficulty").value;
+    const drillEnabled = $("resetDrillMode").value === "true";
+    const drillSeedRaw = $("resetDrillSeed").value.trim();
+    const drillSeed = drillSeedRaw === "" ? null : parseInt(drillSeedRaw, 10);
     if (!sessionId) {
       sessionId = "ui-" + Math.random().toString(36).slice(2, 10);
     }
     const payload = { seed: seed, mode: $("resetMode").value, session_id: sessionId };
     if (diff) payload.difficulty = diff;
+    if (payload.mode === "incident" && drillEnabled) {
+      payload.drill_mode = true;
+      if (Number.isFinite(drillSeed)) payload.drill_seed = drillSeed;
+    }
     const res = await fetch("/reset", {
       method: "POST",
       headers: requestHeaders(true),
@@ -1796,7 +1860,16 @@ async def reset(
     session_id = _resolve_session_id(req.session_id, x_session_id)
     env = await _get_env(session_id, create_if_missing=True)
     try:
-        result = await env.reset(seed=req.seed, difficulty=req.difficulty, mode=req.mode)
+        if isinstance(env, SandboxEnv):
+            result = await env.reset(
+                seed=req.seed,
+                difficulty=req.difficulty,
+                mode=req.mode,
+                drill_mode=req.drill_mode,
+                drill_seed=req.drill_seed,
+            )
+        else:
+            result = await env.reset(seed=req.seed, difficulty=req.difficulty, mode=req.mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _result_to_dict(result, session_id=session_id)

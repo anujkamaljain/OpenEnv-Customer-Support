@@ -3,6 +3,8 @@ description: >
   Enterprise incident response simulation with cascading service failures,
   multi-app tool interaction, policy drift, and dynamic customer management.
   Extends customer support triage with partially observable world modeling.
+  Optional sandbox mode can route incident actions to a live container cluster,
+  including deterministic mid-episode drill failures for transfer testing.
 version: "2.0.0"
 
 entrypoints:
@@ -19,7 +21,7 @@ tasks:
   - name: easy_incident
     description: Single service failure, 2-3 customers, clear root cause
   - name: medium_incident
-    description: Multi-service cascade, 4-6 customers, red herrings, 1 policy change
+    description: Multi-service cascade, 4-5 customers, red herrings, 1 policy change
   - name: hard_incident
     description: Full infrastructure crisis, 8-12 dynamic tickets, outdated KB, multiple policy changes
   - name: nightmare_incident

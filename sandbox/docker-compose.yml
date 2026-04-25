@@ -1,0 +1,75 @@
+services:
+  auth:
+    build: ./services/auth
+    ports:
+      - "5001:5001"
+    networks: [mesh]
+
+  database:
+    build: ./services/database
+    ports:
+      - "5002:5002"
+    networks: [mesh]
+
+  payments:
+    build: ./services/payments
+    ports:
+      - "5003:5003"
+    environment:
+      AUTH_URL: http://auth:5001
+      DB_URL: http://database:5002
+    depends_on:
+      - auth
+      - database
+    networks: [mesh]
+
+  analytics:
+    build: ./services/analytics
+    ports:
+      - "5004:5004"
+    environment:
+      DB_URL: http://database:5002
+    depends_on:
+      - database
+    networks: [mesh]
+
+  notifications:
+    build: ./services/notifications
+    ports:
+      - "5005:5005"
+    environment:
+      PAYMENTS_URL: http://payments:5003
+    depends_on:
+      - payments
+    networks: [mesh]
+
+  chaos-controller:
+    build: ./chaos
+    ports:
+      - "6660:6660"
+    depends_on:
+      - auth
+      - database
+      - payments
+      - analytics
+      - notifications
+    networks: [mesh]
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - auth
+      - database
+      - payments
+      - analytics
+      - notifications
+    networks: [mesh]
+
+networks:
+  mesh:
+    driver: bridge
+

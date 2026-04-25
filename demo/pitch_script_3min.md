@@ -43,10 +43,16 @@ Pipeline: collect trajectories from the environment, train adapter, then evaluat
 
 "And we report policy provenance explicitly. In every run, `policy_used` tells judges whether the trained number came from the real checkpoint or a guarded fallback."
 
+"We also compute a Sim→Sandbox transfer report. It measures how much of the trained gain survives when we swap the backend from deterministic simulation to live containers."
+
+"And we added Failure Curriculum Drill Mode: deterministic mid-episode outages are injected, and we score how quickly and cleanly the agent recovers."
+
 ### 2:20-2:45 — Why this is novel
 
 "This is not a toy grid world. It is a partially observable, multi-app enterprise workflow where naive reward hacking fails.  
 The reward model is dense, structured, and tied to causal outcomes, not a single terminal success bit."
+
+"And unlike static benchmarks, we can now prove backend transfer: simulation-trained behavior is scored again on live infra with the same action API."
 
 ### 2:45-3:00 — Close
 

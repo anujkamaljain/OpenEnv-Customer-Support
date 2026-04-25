@@ -29,10 +29,12 @@ EICC is a deterministic OpenEnv environment that trains LLM agents to behave lik
 
 ## For Judges: 60-Second Walkthrough
 
-1. **Problem (why it matters):** Most LLM benchmarks test isolated skills. Real enterprise incidents require partial observability, causal reasoning, long-horizon execution, and tool orchestration.
-2. **Environment:** 21 typed actions across 4 incident phases, 5-service causal mesh, 8 enterprise tools, 18 hand-crafted scenarios, deterministic reward (no LLM judge).
-3. **Training:** GRPO on Qwen2.5-3B via Unsloth + HF TRL in Colab. Reward includes strict JSON-shape, phase-availability, investigation-before-action, KB cross-verification, policy awareness, and trajectory-grounded action values. Concise-output and cap-hit penalties prevent reward hacking.
-4. **Evidence:** `evaluate.py` produces dual-panel reward curves (normalized + raw), per-difficulty breakdown, root-cause accuracy, 8 tracked behavioral skills, and a machine-readable `trained_report.json` that records `policy_used` (`trained_checkpoint` vs `trained_heuristic` fallback) so judges can see exactly which policy produced each run.
+This submission is an **RL environment** for OpenEnv, plus a complete GRPO training pipeline that demonstrably improves an LLM agent's behavior on it.
+
+1. **The RL environment (core deliverable):** 21 typed actions across 4 incident phases, 5-service causal mesh, 18 hand-crafted scenarios, deterministic per-step reward (no LLM judge), partial observability (root cause hidden), and reproducible seeds. Tools, policies, and a customer/stakeholder layer are part of the world model so the agent has to investigate before acting rather than guess.
+2. **Why it is hard for current LLMs:** real enterprise incidents need partial observability, causal reasoning, long-horizon execution, and tool orchestration — not isolated single-turn skills.
+3. **Training (RL pipeline):** GRPO on `Qwen2.5-3B-Instruct` via Unsloth + HF TRL in Colab. Reward shaping enforces strict JSON-shape, phase-availability, investigation-before-action, KB cross-verification, policy awareness, and trajectory-grounded action values. Concise-output and cap-hit penalties prevent reward hacking on long generations.
+4. **Evidence:** `evaluate.py` produces per-difficulty stage reward curves (`reward_curve_easy.png`, `reward_curve_medium.png`, `reward_curve_hard.png`), root-cause accuracy, 8 tracked behavioral skills, and a machine-readable `trained_report.json` that records `policy_used` (`trained_checkpoint` vs `trained_heuristic` fallback) so judges can see exactly which policy produced each run.
 
 ### Judging criteria mapping (40 / 30 / 20 / 10)
 
@@ -40,7 +42,7 @@ EICC is a deterministic OpenEnv environment that trains LLM agents to behave lik
 |---|---|
 | **Environment Innovation (40%)** | Partial-observability enterprise world model with causal service mesh, policy drift, outdated KBs, dynamic ticket arrivals, stakeholder patience, CAB approval gate, and blast-radius on wrong fixes. 11 explicit anti-shortcut mechanisms. |
 | **Storytelling (30%)** | Single-page README TL;DR, 3-min pitch + 2-min video scripts in `demo/`, architecture diagram, incident walkthrough, and HF mini-blog draft. |
-| **Reward Improvement (20%)** | `reward_curves.png` (dual-panel: normalized clamped + raw that exposes negative baselines), `baseline_report.json` vs `trained_report.json`, 8 behavioral skill diffs. |
+| **Reward Improvement (20%)** | Per-difficulty stage curves (`reward_curve_easy.png`, `reward_curve_medium.png`, `reward_curve_hard.png`) showing monotonic best-so-far reward growth, plus `baseline_report.json` vs `trained_report.json` and 8 behavioral skill diffs. |
 | **Reward & Training Pipeline (10%)** | GRPO with compact-JSON / single-JSON / cap-hit / multi-JSON / extra-text penalties; trajectory-grounded action-reward lookup; structured diagnostics every N batches with unhealthy-signal warnings. |
 
 ---
@@ -54,15 +56,15 @@ Open `train_notebook.ipynb` and run in order:
 | 1 | Clone repo | < 10 s |
 | 2 | Install deps (Unsloth + TRL + peft + bitsandbytes) | ~3 min |
 | 3 | Dry-run sanity: `python train.py --dry-run` | < 30 s |
-| 4 | Baseline evaluation (writes `artifacts/eval/baseline_report.json`) | ~1 min |
-| 5a | Quick-mode GRPO training (`--iterations 10 --episodes 15 --k 2`) | ~1.5–2 hrs on T4 |
+| 4 | Baseline evaluation (writes `artifacts/eval_simple/baseline_report.json`) | ~1 min |
+| 5a | Quick-mode GRPO training (`--iterations 6 --episodes 8 --k 2`) | ~45–75 min on A10/T4 |
 | 5b | Full-mode GRPO training (`--iterations 20 --episodes 30 --k 4`) | ~6–8 hrs on T4 |
 | 6 | Post-training compare: `evaluate.py --policy compare --compare-trained-policy trained_checkpoint` | ~5–15 min |
 | 7–8 | Inspect reports and plot | instant |
 | 9–10 | (Optional) two-seed reproducibility | 2× Step 5 time |
 
 Artifacts land in `artifacts/...` and can be downloaded from the Colab file browser.  
-Step 5 also writes an internal checkpoint-eval snapshot under `artifacts/train/checkpoint_eval/`; Step 6 writes judge-facing compare outputs under `artifacts/eval/`.
+Step 5 also writes an internal checkpoint-eval snapshot under `artifacts/train/checkpoint_eval/`; Step 6 writes judge-facing compare outputs under `artifacts/eval_simple/` (or `artifacts/eval_sandbox/` for sandbox lane).
 
 ---
 
@@ -100,9 +102,9 @@ Actions are phase-gated: the agent sees only valid actions for the current phase
 | Tier | Count | Steps | Customers | Characteristics |
 |---|---:|---:|---:|---|
 | easy | 3 | 40 | 2–3 | single failure, clear root cause |
-| medium | 5 | 50 | 4–6 | cascading issues, red herrings, one policy drift |
-| hard | 7 | 70 | 8–12 | deeper cascades, outdated KB, multiple drifts |
-| nightmare | 3 | 80 | 10–15 | compound faults, high noise, maximum complexity |
+| medium | 5 | 50 | 4–5 | cascading issues, red herrings, one policy drift |
+| hard | 7 | 70 | 8 | deeper cascades, outdated KB, multiple drifts |
+| nightmare | 3 | 80 | 10 | compound faults, high noise, maximum complexity |
 
 ### Partial observability
 
@@ -127,11 +129,34 @@ Training-time reward adds strict output-shape penalties (single JSON, no extra p
 
 No LLM judge is used. All reward logic is in the repo (`graders/` and `env/`).
 
+### Composable Rubric API (OpenEnv-native)
+
+The reward signal is also exposed as composable `openenv.core.rubrics.Rubric`
+subclasses in `graders/openenv_rubrics.py`. The top-level `IncidentRewardRubric`
+nests `Sequential`, `Gate`, and `WeightedSum` containers so external tooling
+can introspect every reward dimension by dot-path:
+
+```python
+from graders.openenv_rubrics import IncidentRewardRubric
+
+rubric = IncidentRewardRubric()
+for path, dim in rubric.named_rubrics():
+    print(path)
+# -> investigation_before_action, kb_cross_verification, policy_awareness,
+#    root_cause_accuracy, blast_radius_safe, resource_budget_respected,
+#    weighted_sum, shape_gate, phase_gate, gated_reward
+```
+
+The rubric tree is **read-only** with respect to the env: it inspects
+`info.reward_breakdown` produced by the canonical reward path without
+mutating env state. Tests in `tests/test_openenv_rubrics.py` verify both
+the API contract and that no env reward drift is introduced.
+
 ---
 
 ## Training Pipeline
 
-- `train.py` — collects trajectories from the live environment across a curriculum (easy → nightmare), runs GRPO (Unsloth + TRL) on Qwen2.5-3B with LoRA, saves adapter to `artifacts/train/trained_adapter/`, then runs baseline vs trained evaluation with dual-panel reward plots.
+- `train.py` — collects trajectories from the live environment across a curriculum (easy → nightmare), runs GRPO (Unsloth + TRL) on Qwen2.5-3B with LoRA, saves adapter to `artifacts/train/trained_adapter/`, then runs baseline vs trained evaluation with per-difficulty stage reward curves.
 - `evaluate.py` — deterministic incident episodes per difficulty tier; reports normalized / raw reward, SLA compliance, root-cause accuracy, long-horizon consistency, 8 behavioral skills, and `policy_used` provenance.
 - `train_notebook.ipynb` — Colab-first flow with dry-run, baseline eval, training (quick or full), compare eval, plotting, and optional two-seed reproducibility.
 
@@ -147,7 +172,7 @@ python train.py --iterations 10 --episodes 15 --k 2 --max-completion-length 96
 # Full training (Colab T4, ~6-8 hrs)
 python train.py --iterations 20 --episodes 30 --k 4 --max-completion-length 128
 
-# Heuristic compare (fast evidence)
+# Default compare (trained checkpoint first; heuristic only if checkpoint missing)
 python evaluate.py --policy compare --episodes-per-difficulty 5 --plot --output-dir artifacts/eval
 
 # Checkpoint-based compare (use after a real training run)
@@ -156,6 +181,23 @@ python evaluate.py --policy compare \
   --checkpoint-dir artifacts/train/trained_adapter \
   --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
   --episodes-per-difficulty 5 --plot --output-dir artifacts/eval
+
+# Sandbox compare (live container-backed backend, same action API)
+python evaluate.py --policy compare \
+  --compare-trained-policy trained_checkpoint \
+  --checkpoint-dir artifacts/train/trained_adapter \
+  --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
+  --episodes-per-difficulty 1 \
+  --sandbox --output-dir artifacts/eval_sandbox
+
+# Sandbox drill compare (deterministic mid-episode chaos curriculum)
+python evaluate.py --policy compare \
+  --compare-trained-policy trained_checkpoint \
+  --checkpoint-dir artifacts/train/trained_adapter \
+  --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
+  --episodes-per-difficulty 1 \
+  --sandbox --sandbox-drill-mode --sandbox-drill-seed 7 \
+  --output-dir artifacts/eval_sandbox_drill
 ```
 
 ---
@@ -172,6 +214,13 @@ Per-episode:
 
 Aggregates: `avg_normalized_reward`, `avg_raw_reward`, per-difficulty averages, `policy_used`, `episodes_per_difficulty`.
 
+Sandbox drill mode additionally reports per-step drill telemetry in response info:
+
+- `info.sandbox.drill.events`
+- `info.sandbox.drill.injected_steps`
+- `info.sandbox.drill.resolved_steps`
+- `info.sandbox.drill.drill_score`
+
 ---
 
 ## Results
@@ -180,7 +229,7 @@ This repository ships the full training and evaluation pipeline. Real numbers ar
 
 When you run the full Colab notebook end-to-end on a T4:
 - Training output: `artifacts/train/trained_adapter/`
-- Evaluation output: `artifacts/eval/reward_curves.png`, `baseline_report.json`, `trained_report.json`
+- Evaluation output: `artifacts/eval_simple/reward_curve_{easy,medium,hard}.png`, `baseline_report.json`, `trained_report.json`
 
 > **`policy_used` field:** both `baseline_report.json` and `trained_report.json` include `policy_used` so you can confirm whether trained-side numbers came from the **real Qwen LoRA checkpoint** (`trained_checkpoint`) or the **deterministic heuristic fallback** (`trained_heuristic`). We keep this explicit in logs/reports for transparency.
 
@@ -203,6 +252,11 @@ Example:
 curl -X POST http://localhost:7860/reset \
   -H "Content-Type: application/json" \
   -d '{"mode":"incident","difficulty":"easy","seed":0}'
+
+# Sandbox drill reset (optional add-on fields)
+curl -X POST http://localhost:7860/reset \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"incident","difficulty":"hard","seed":0,"drill_mode":true,"drill_seed":7}'
 ```
 
 ---
@@ -232,6 +286,61 @@ The container defaults to 1 worker with a healthcheck on `/health`. Episode stat
 
 ---
 
+## Sandbox Mode (Live Cluster Demo)
+
+In addition to the deterministic simulated environment used for training, this repo ships an optional
+container-backed sandbox under `sandbox/` for demo/evaluation.
+
+- Start the live cluster:
+
+```bash
+docker compose -f sandbox/docker-compose.yml up --build -d
+```
+
+- Enable sandbox backend for API server:
+
+```bash
+set OPENENV_SANDBOX=true
+set OPENENV_SANDBOX_CLUSTER_URL=http://localhost
+set OPENENV_SANDBOX_CHAOS_URL=http://localhost:6660
+python -m server.app
+```
+
+- Run evaluation against sandbox backend:
+
+```bash
+python evaluate.py --policy compare --episodes-per-difficulty 1 --sandbox
+```
+
+- Compute **Sim -> Sandbox Transfer Score** (new differentiator metric):
+
+```bash
+python evaluate.py --policy compare \
+  --compare-trained-policy trained_checkpoint \
+  --checkpoint-dir artifacts/train/trained_adapter \
+  --checkpoint-base-model Qwen/Qwen2.5-3B-Instruct \
+  --episodes-per-difficulty 1 \
+  --transfer-report --sandbox-drill-mode --sandbox-drill-seed 7 \
+  --output-dir artifacts/eval_transfer
+```
+
+This writes:
+
+- `baseline_sim_report.json`
+- `trained_sim_report.json`
+- `baseline_sandbox_report.json`
+- `trained_sandbox_report.json`
+- `transfer_report.json` (retention/gap summary for normalized/raw reward + per-skill transfer)
+
+When sandbox is active, the same `/reset` and `/step` contract is preserved; incident actions additionally
+include live cluster details in `info.sandbox` and `observation.tool_results.sandbox_live`.
+
+Detailed local setup/testing runbook:
+
+- `sandbox/LOCAL_TEST_RUNBOOK.md`
+
+---
+
 ## Determinism Contract
 
 - Seeded scenario selection and service-mesh behavior
@@ -249,7 +358,7 @@ The container defaults to 1 worker with a healthcheck on `/health`. Episode stat
 - 3-minute pitch script: `demo/pitch_script_3min.md`
 - 2-minute video script: `demo/video_script_2min.md`
 - HF mini-blog draft: `demo/hf_mini_blog.md`
-- Reward curve PNG is produced by `evaluate.py` into `--output-dir` (default `artifacts/eval/reward_curves.png`)
+- Reward curve PNGs are produced by `evaluate.py` into `--output-dir` as `reward_curve_easy.png`, `reward_curve_medium.png`, `reward_curve_hard.png` (default base dir `artifacts/eval/`)
 
 ---
 
@@ -270,7 +379,7 @@ The container defaults to 1 worker with a healthcheck on `/health`. Episode stat
 - [x] Training script + Colab notebook using Unsloth + HF TRL (`train.py`, `train_notebook.ipynb`)
 - [x] Hugging Face Space deployment + link in README
 - [x] README motivates the problem, explains the env, and describes the results flow
-- [x] Evaluation pipeline emits baseline + trained reports and a dual-panel reward curve
+- [x] Evaluation pipeline emits baseline + trained reports and per-difficulty stage reward curves
 - [x] Checkpoint-based evaluation path (`--policy trained_checkpoint`) + heuristic fallback with `policy_used` provenance
 - [x] HF mini-blog draft committed (`demo/hf_mini_blog.md`)
 - [x] Pitch and video scripts committed (`demo/pitch_script_3min.md`, `demo/video_script_2min.md`)
@@ -287,7 +396,8 @@ env/           # world + systems + environment dispatch/state machine
 models/        # pydantic action/observation/incident schemas
 graders/       # deterministic ticket + incident graders
 tasks/         # ticket bank + incident bank + scenario data
-tests/         # full backward-compat + incident test suite (404 tests)
+tests/         # full backward-compat + incident test suite (428 tests)
+sandbox/       # optional live container cluster + chaos controller (eval/demo)
 train.py       # GRPO training pipeline
 evaluate.py    # deterministic evaluation + before/after comparison + plotting
 openenv.yaml   # OpenEnv manifest

@@ -269,6 +269,9 @@ def _run_checkpoint_eval_subprocess(
     checkpoint_dir: Path,
     checkpoint_base_model: str,
     output_dir: Path,
+    sandbox: bool = False,
+    sandbox_drill_mode: bool = False,
+    sandbox_drill_seed: int | None = None,
 ) -> object:
     """Run trained-checkpoint evaluation in a clean process.
 
@@ -295,6 +298,12 @@ def _run_checkpoint_eval_subprocess(
         "--output-dir",
         str(eval_output_dir),
     ]
+    if sandbox:
+        eval_cmd.append("--sandbox")
+    if sandbox_drill_mode:
+        eval_cmd.append("--sandbox-drill-mode")
+    if sandbox_drill_seed is not None:
+        eval_cmd.extend(["--sandbox-drill-seed", str(sandbox_drill_seed)])
     result = subprocess.run(
         eval_cmd,
         capture_output=True,
@@ -363,6 +372,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-fallback",
         action="store_true",
         help="Allow transformers+peft fallback when Unsloth is unavailable.",
+    )
+    parser.add_argument(
+        "--sandbox-drill-eval",
+        action="store_true",
+        help=(
+            "Optional post-training sandbox drill evaluation. "
+            "Requires local sandbox cluster + OPENENV_SANDBOX_* connectivity."
+        ),
+    )
+    parser.add_argument(
+        "--sandbox-drill-seed",
+        type=int,
+        default=None,
+        help="Deterministic seed override for sandbox drill schedule.",
     )
     return parser
 
@@ -791,6 +814,42 @@ def main() -> None:
     plot_reports(baseline, trained, output_dir)
     trained.print_comparison(baseline)
     print(f"[train] trained_report.policy_used={trained.policy_used}")
+
+    if args.sandbox_drill_eval:
+        print("[train] running optional sandbox drill evaluation (add-on)...")
+        sbx_baseline = evaluate_policy(
+            policy="baseline",
+            episodes_per_difficulty=args.eval_episodes,
+            sandbox=True,
+            sandbox_drill_mode=True,
+            sandbox_drill_seed=args.sandbox_drill_seed,
+        )
+        try:
+            sbx_trained = _run_checkpoint_eval_subprocess(
+                episodes_per_difficulty=args.eval_episodes,
+                checkpoint_dir=trained_adapter_dir,
+                checkpoint_base_model=model_name,
+                output_dir=output_dir / "sandbox_drill_eval",
+                sandbox=True,
+                sandbox_drill_mode=True,
+                sandbox_drill_seed=args.sandbox_drill_seed,
+            )
+        except Exception as exc:
+            print(
+                "[train] sandbox checkpoint eval unavailable; "
+                f"falling back to trained_heuristic policy ({exc})."
+            )
+            sbx_trained = evaluate_policy(
+                policy="trained_heuristic",
+                episodes_per_difficulty=args.eval_episodes,
+                sandbox=True,
+                sandbox_drill_mode=True,
+                sandbox_drill_seed=args.sandbox_drill_seed,
+            )
+        sbx_trained.behavior_examples = behavior_diffs(sbx_baseline, sbx_trained)
+        write_json(output_dir / "baseline_sandbox_drill_report.json", asdict(sbx_baseline))
+        write_json(output_dir / "trained_sandbox_drill_report.json", asdict(sbx_trained))
+        print("[train] sandbox drill reports written.")
 
 
 if __name__ == "__main__":

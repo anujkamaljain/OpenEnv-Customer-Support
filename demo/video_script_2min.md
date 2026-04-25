@@ -28,6 +28,10 @@ We track normalized reward, raw cumulative reward, root-cause accuracy, and long
 
 "We also log `policy_used` for transparency, so judges can verify whether a run used the checkpoint policy or a guarded fallback."
 
+"And we now publish a Sim→Sandbox transfer report to show how much trained behavior carries over from simulation to live container-backed infrastructure."
+
+"We also run a deterministic drill mode where new failures appear mid-episode, and track a drill score for recovery quality."
+
 ## 1:43 - 2:00 Close
 
 "EICC is deterministic, reproducible, and deployed on Hugging Face Spaces.  
