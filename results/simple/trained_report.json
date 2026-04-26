@@ -1,0 +1,105 @@
+{
+  "avg_normalized_reward": 0.1931388888888889,
+  "avg_raw_reward": -0.8554999999999999,
+  "sla_compliance_rate": 0.0,
+  "tool_efficiency": 0.6334812409812411,
+  "root_cause_accuracy": 0.25,
+  "long_horizon_consistency": 0.1875,
+  "skill_scores": {
+    "investigation_before_action": 0.6,
+    "kb_cross_verification": 0.85,
+    "policy_checking": 0.85,
+    "stakeholder_proactivity": 0.4,
+    "root_cause_accuracy": 0.25,
+    "tone_matching": 0.65,
+    "resource_efficiency": 1.0,
+    "red_herring_dismissal": 0.25
+  },
+  "per_difficulty": {
+    "easy": 0.292,
+    "medium": 0.22166666666666668,
+    "hard": 0.2333333333333333,
+    "nightmare": 0.025555555555555554
+  },
+  "reward_history": [
+    0.31,
+    0.42,
+    0.0,
+    0.31,
+    0.42,
+    0.42500000000000004,
+    0.1,
+    0.1,
+    0.4416666666666667,
+    0.04166666666666667,
+    0.26,
+    0.5,
+    0.35333333333333333,
+    0.0,
+    0.05333333333333334,
+    0.0,
+    0.0,
+    0.12777777777777777,
+    0.0,
+    0.0
+  ],
+  "raw_reward_history": [
+    0.31,
+    0.42,
+    -1.14,
+    0.31,
+    0.42,
+    0.51,
+    0.12,
+    0.12,
+    0.53,
+    0.05,
+    0.39,
+    0.75,
+    0.53,
+    -0.24,
+    0.08,
+    -0.1,
+    -10.15,
+    0.23,
+    -0.1,
+    -10.15
+  ],
+  "per_difficulty_reward_history": {
+    "easy": [
+      0.31,
+      0.42,
+      0.0,
+      0.31,
+      0.42
+    ],
+    "medium": [
+      0.42500000000000004,
+      0.1,
+      0.1,
+      0.4416666666666667,
+      0.04166666666666667
+    ],
+    "hard": [
+      0.26,
+      0.5,
+      0.35333333333333333,
+      0.0,
+      0.05333333333333334
+    ],
+    "nightmare": [
+      0.0,
+      0.0,
+      0.12777777777777777,
+      0.0,
+      0.0
+    ]
+  },
+  "behavior_examples": [
+    "Investigation strategy: check_monitoring-before-fix 100% -> 60%.",
+    "KB trust vs verification: kb_cross_verification 100% -> 85%.",
+    "Long-horizon execution: consistency 0.00 -> 0.19."
+  ],
+  "policy_used": "trained_checkpoint",
+  "episodes_per_difficulty": 5
+}
