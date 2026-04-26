@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from env.environment import CustomerSupportEnv
+from models.action import ActionAdapter
 from models.observation import Observation
 from sandbox.env_adapter import SandboxEnv
 
@@ -62,14 +63,71 @@ TRACKED_SKILLS: tuple[str, ...] = (
 
 REQUIRED_FIELDS_BY_ACTION: dict[str, tuple[str, ...]] = {
     "classify": ("category", "priority"),
+    "route": ("department",),
     "probe_service": ("service_name", "check_type"),
     "fetch_logs": ("service_name", "time_range"),
+    "fetch_user_data": ("customer_id",),
+    "check_billing": ("customer_id",),
+    "query_kb": ("query",),
+    "check_policy": ("policy_type",),
+    "query_incident_history": ("query",),
     "respond": ("response_text", "tone"),
     "apply_fix": ("service_name", "fix_type"),
+    "verify_fix": ("service_name",),
+    "rollback_fix": ("service_name",),
+    "request_info": ("question_to_customer",),
+    "escalate": ("reason", "target_team"),
     "resolve": ("resolution_summary",),
-    "notify_stakeholders": ("stakeholder", "urgency"),
+    "notify_stakeholders": ("stakeholder", "urgency", "message"),
+    "follow_runbook_step": ("runbook_id", "step_index"),
     "write_postmortem": ("summary", "root_cause_description"),
     "update_kb": ("article_title", "content"),
+}
+
+# Literal value whitelists per action type (sourced from models/action.py).
+# These keep checkpoint hallucinations (e.g. category="cyber") from reaching
+# the env. If a value is outside the whitelist, sanitization will drop the
+# candidate and use the deterministic heuristic fallback for that step.
+_LITERAL_FIELDS_BY_ACTION: dict[str, dict[str, frozenset[str]]] = {
+    "classify": {
+        "category": frozenset(
+            {
+                "billing",
+                "bug_report",
+                "feature_request",
+                "account_access",
+                "general_inquiry",
+                "cancellation",
+            }
+        ),
+        "priority": frozenset({"low", "medium", "high", "critical"}),
+    },
+    "route": {
+        "department": frozenset({"billing", "technical", "account", "general"}),
+    },
+    "respond": {
+        "tone": frozenset({"formal", "empathetic", "concise"}),
+    },
+    "escalate": {
+        "target_team": frozenset({"l2_support", "engineering", "management"}),
+    },
+    "probe_service": {
+        "check_type": frozenset({"logs", "resources", "connections", "config"}),
+    },
+    "fetch_logs": {
+        "time_range": frozenset({"last_5m", "last_15m", "last_1h"}),
+    },
+    "check_policy": {
+        "policy_type": frozenset(
+            {"refund", "escalation", "sla", "compensation", "communication"}
+        ),
+    },
+    "notify_stakeholders": {
+        "stakeholder": frozenset(
+            {"vp_engineering", "legal", "support_lead", "all"}
+        ),
+        "urgency": frozenset({"info", "warning", "critical"}),
+    },
 }
 
 PHASE_ALLOWED_ACTIONS: dict[str, set[str]] = {
@@ -465,37 +523,191 @@ def _sanitize_checkpoint_action(
     payload: dict[str, object] | None,
     decoded_text: str,
 ) -> dict[str, object]:
-    """Return a safe action for env.step, falling back to heuristic when needed."""
+    """Return a safe action for env.step, falling back to heuristic when needed.
+
+    The sanitizer is intentionally defensive. Checkpoint outputs sometimes
+    contain hallucinated literals (e.g. category="cyber"), invalid runbook IDs
+    (e.g. "RB-02"), or out-of-range step indices. Any unrecoverable issue
+    returns the deterministic heuristic fallback so env.step never crashes.
+    """
     fallback = choose_policy_action(obs, state, "trained_heuristic")
 
-    if not isinstance(payload, dict):
-        return fallback
-
-    # Reject obviously broken outputs (HTML tags, chat-style "Human:" bleed)
-    if re.search(r"<[^>]+>", decoded_text or "") or "Human:" in (decoded_text or ""):
-        return fallback
-
-    action_type = str(payload.get("action_type", "")).strip()
-    available = set(obs.available_actions)
-    if not action_type or action_type not in available:
-        return fallback
-
-    # Keep only JSON-safe, env-serializable values.
-    candidate: dict[str, object] = {"action_type": action_type}
-    for key, value in payload.items():
-        if key == "action_type":
-            continue
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            candidate[str(key)] = value
-        elif isinstance(value, list):
-            candidate[str(key)] = value
-
-    required_fields = REQUIRED_FIELDS_BY_ACTION.get(action_type, ())
-    for field_name in required_fields:
-        if candidate.get(field_name) in (None, ""):
+    try:
+        if not isinstance(payload, dict):
             return fallback
 
-    return candidate
+        # Reject obviously broken outputs (HTML tags, chat-style "Human:" bleed).
+        if re.search(r"<[^>]+>", decoded_text or "") or "Human:" in (decoded_text or ""):
+            return fallback
+
+        action_type = str(payload.get("action_type", "")).strip()
+        available = set(obs.available_actions)
+        if not action_type or action_type not in available:
+            return fallback
+
+        # Keep only JSON-safe, env-serializable values.
+        candidate: dict[str, object] = {"action_type": action_type}
+        for key, value in payload.items():
+            if key == "action_type":
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                candidate[str(key)] = value
+            elif isinstance(value, list):
+                candidate[str(key)] = value
+
+        # ---------- per-action repairs ----------
+
+        if action_type == "follow_runbook_step":
+            # Map legacy `step` -> canonical `step_index`.
+            if candidate.get("step_index") in (None, "") and candidate.get("step") not in (None, ""):
+                try:
+                    candidate["step_index"] = int(candidate["step"])  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    pass
+            # Always anchor runbook_id to the env-provided suggested runbook
+            # to avoid hallucinated IDs (e.g. "RB-02") that don't exist.
+            if isinstance(obs.suggested_runbook, dict):
+                suggested_id = obs.suggested_runbook.get("runbook_id")
+                if isinstance(suggested_id, str) and suggested_id:
+                    candidate["runbook_id"] = suggested_id
+            if candidate.get("runbook_id") in (None, ""):
+                return fallback
+            # Keep step_index within the suggested runbook's known indices.
+            if isinstance(obs.suggested_runbook, dict):
+                suggested_steps = obs.suggested_runbook.get("steps")
+                if isinstance(suggested_steps, list):
+                    valid_indices: list[int] = []
+                    for item in suggested_steps:
+                        if isinstance(item, dict):
+                            idx = item.get("step_index")
+                            if isinstance(idx, int):
+                                valid_indices.append(idx)
+                    if valid_indices:
+                        try:
+                            current_idx = int(candidate.get("step_index"))  # type: ignore[arg-type]
+                        except (TypeError, ValueError):
+                            current_idx = valid_indices[0]
+                        if current_idx not in valid_indices:
+                            current_idx = valid_indices[0]
+                        candidate["step_index"] = current_idx
+                    else:
+                        candidate["step_index"] = 0
+                else:
+                    candidate.setdefault("step_index", 0)
+            else:
+                candidate.setdefault("step_index", 0)
+            candidate.pop("step", None)
+
+        if action_type in {"apply_fix", "verify_fix", "rollback_fix", "probe_service", "fetch_logs"}:
+            # Anchor service_name to a real service in current system_status.
+            status = obs.system_status if isinstance(obs.system_status, dict) else {}
+            allowed_services = set(status.keys())
+            service_value = candidate.get("service_name")
+            if not isinstance(service_value, str) or service_value not in allowed_services:
+                impacted = _pick_impacted_service(obs, state.known_service)
+                if isinstance(impacted, str) and impacted:
+                    candidate["service_name"] = impacted
+                else:
+                    return fallback
+
+        if action_type == "apply_fix":
+            fix_type = candidate.get("fix_type")
+            if not isinstance(fix_type, str) or not fix_type.strip():
+                # Use deterministic mapping from known root cause to fix.
+                state_fix = state.known_fix_type or "restart_service"
+                candidate["fix_type"] = state_fix
+
+        if action_type in {"fetch_user_data", "check_billing"}:
+            customer_value = candidate.get("customer_id")
+            if not isinstance(customer_value, str) or not customer_value.strip():
+                candidate["customer_id"] = _default_customer_id(obs)
+
+        if action_type == "query_kb":
+            query_value = candidate.get("query")
+            if not isinstance(query_value, str) or not query_value.strip():
+                candidate["query"] = obs.incident_title or "incident"
+
+        if action_type == "query_incident_history":
+            query_value = candidate.get("query")
+            if not isinstance(query_value, str) or not query_value.strip():
+                candidate["query"] = obs.incident_title or "similar incidents"
+
+        if action_type == "respond":
+            response_value = candidate.get("response_text")
+            if not isinstance(response_value, str) or not response_value.strip():
+                candidate["response_text"] = (
+                    "We are investigating and will share updates shortly."
+                )
+
+        if action_type == "request_info":
+            question_value = candidate.get("question_to_customer")
+            if not isinstance(question_value, str) or not question_value.strip():
+                candidate["question_to_customer"] = (
+                    "Could you share the affected user IDs and the exact time?"
+                )
+
+        if action_type == "escalate":
+            reason_value = candidate.get("reason")
+            if not isinstance(reason_value, str) or not reason_value.strip():
+                candidate["reason"] = "Customer impact requires specialist support."
+
+        if action_type == "resolve":
+            summary_value = candidate.get("resolution_summary")
+            if not isinstance(summary_value, str) or not summary_value.strip():
+                candidate["resolution_summary"] = "Incident reviewed and currently stable."
+
+        if action_type == "notify_stakeholders":
+            message_value = candidate.get("message")
+            if not isinstance(message_value, str) or not message_value.strip():
+                candidate["message"] = "Status update on the active incident."
+
+        if action_type == "write_postmortem":
+            summary_value = candidate.get("summary")
+            if not isinstance(summary_value, str) or not summary_value.strip():
+                candidate["summary"] = "Incident resolved with documented remediation."
+            cause_value = candidate.get("root_cause_description")
+            if not isinstance(cause_value, str) or not cause_value.strip():
+                candidate["root_cause_description"] = (
+                    state.known_root_cause or "Service degradation handled."
+                )
+
+        if action_type == "update_kb":
+            title_value = candidate.get("article_title")
+            if not isinstance(title_value, str) or not title_value.strip():
+                candidate["article_title"] = obs.incident_title or "Incident KB update"
+            content_value = candidate.get("content")
+            if not isinstance(content_value, str) or not content_value.strip():
+                candidate["content"] = "Captured remediation steps and verification."
+
+        # ---------- literal whitelist enforcement ----------
+
+        literal_fields = _LITERAL_FIELDS_BY_ACTION.get(action_type, {})
+        for field_name, allowed in literal_fields.items():
+            value = candidate.get(field_name)
+            if isinstance(value, str) and value in allowed:
+                continue
+            # If invalid, drop the value so a default (if any) can apply,
+            # otherwise fall back. We avoid silently substituting a literal
+            # that could mislead reward attribution.
+            return fallback
+
+        # ---------- required fields gate ----------
+
+        required_fields = REQUIRED_FIELDS_BY_ACTION.get(action_type, ())
+        for field_name in required_fields:
+            if candidate.get(field_name) in (None, ""):
+                return fallback
+
+        # ---------- final canonical schema validation ----------
+
+        try:
+            parsed = ActionAdapter.validate_python(candidate)
+        except Exception:
+            return fallback
+        return parsed.model_dump(exclude_none=True)
+    except Exception:
+        # Last-resort safety net: never let a sanitizer bug crash evaluation.
+        return fallback
 
 
 def _build_checkpoint_selector(
@@ -521,31 +733,37 @@ def _build_checkpoint_selector(
     model.eval()
 
     def _selector(obs: Observation, state: PolicyState) -> dict[str, object]:
-        prompt = _build_model_prompt(obs)
-        encoded = tokenizer(
-            prompt,
-            return_tensors="pt",
-            truncation=True,
-            max_length=1536,
-        )
-        device = next(model.parameters()).device
-        encoded = {k: v.to(device) for k, v in encoded.items()}
-        output = model.generate(
-            **encoded,
-            max_new_tokens=192,
-            do_sample=False,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-        new_tokens = output[0][encoded["input_ids"].shape[1] :]
-        decoded = tokenizer.decode(new_tokens, skip_special_tokens=True)
-        payload = _extract_first_json_action(decoded)
-        return _sanitize_checkpoint_action(
-            obs=obs,
-            state=state,
-            payload=payload,
-            decoded_text=decoded,
-        )
+        # Defensive wrapper: any failure here (generation OOM, tokenizer error,
+        # bad decode, sanitizer edge case) returns a safe heuristic fallback so
+        # evaluation never crashes mid-episode.
+        try:
+            prompt = _build_model_prompt(obs)
+            encoded = tokenizer(
+                prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=1536,
+            )
+            device = next(model.parameters()).device
+            encoded = {k: v.to(device) for k, v in encoded.items()}
+            output = model.generate(
+                **encoded,
+                max_new_tokens=192,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+            new_tokens = output[0][encoded["input_ids"].shape[1] :]
+            decoded = tokenizer.decode(new_tokens, skip_special_tokens=True)
+            payload = _extract_first_json_action(decoded)
+            return _sanitize_checkpoint_action(
+                obs=obs,
+                state=state,
+                payload=payload,
+                decoded_text=decoded,
+            )
+        except Exception:
+            return choose_policy_action(obs, state, "trained_heuristic")
 
     return _selector
 
