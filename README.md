@@ -20,7 +20,7 @@ short_description: Enterprise incident response world model for OpenEnv
 
 EICC is a deterministic OpenEnv environment that trains LLM agents to behave like a senior SRE / incident commander: diagnose cascading microservice failures, cross-verify potentially outdated knowledge bases, coordinate tools and stakeholders, and execute multi-step remediation - all under SLA pressure and partial observability.
 
-- **Live Hugging Face Space:** [anuj2209-openenv-customer-support.hf.space](https://anuj2209-openenv-customer-support.hf.space)
+- **Hugging Face Space (repo):** [Anuj2209/openenv-customer-support](https://huggingface.co/spaces/Anuj2209/openenv-customer-support/tree/main)
 - **OpenEnv API:** async `reset()` / `step()` / `state()` / `close()` + HTTP server
 - **Three modes:** Ticket mode · Incident mode (Mock env) · Incident mode (VM env)
 
@@ -60,9 +60,9 @@ agents accumulate positive reward.
 
 ## Public Submission Links
 
-- **Hugging Face Space (Env):** https://anuj2209-openenv-customer-support.hf.space
-- **Training Notebook:** [`train_notebook.ipynb`](./train_notebook.ipynb) (HF Space repo)
-- **Blog Post:** [`Blog.md`](./Blog.md) (HF Space repo)
+- **Hugging Face Space (Env):** https://huggingface.co/spaces/Anuj2209/openenv-customer-support/tree/main
+- **Training Notebook:** https://huggingface.co/spaces/Anuj2209/openenv-customer-support/blob/main/train_notebook.ipynb
+- **Blog Post:** https://huggingface.co/spaces/Anuj2209/openenv-customer-support/blob/main/Blog.md
 
 ---
 
